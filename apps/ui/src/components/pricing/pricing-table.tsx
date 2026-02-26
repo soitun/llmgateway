@@ -85,7 +85,7 @@ const pricingFeatures: PricingFeature[] = [
 	{
 		name: "Bring Your Own Keys (BYOK)",
 		description: "Use your own provider API keys",
-		free: "Included",
+		free: "5% fee",
 		enterprise: "Custom limits",
 	},
 	{

@@ -59,7 +59,7 @@ export function PricingPlans() {
 			features: [
 				"Access to ALL models",
 				"Pay with credits (5% fee)",
-				"Bring Your Own Keys (free)",
+				"Bring Your Own Keys (5% fee)",
 				"30-day data retention",
 				"Team Management",
 				"Advanced Analytics",

@@ -24,7 +24,7 @@ import {
 } from "@llmgateway/db";
 import { logger } from "@llmgateway/logger";
 import { hasErrorCode } from "@llmgateway/models";
-import { calculateFees } from "@llmgateway/shared";
+import { BYOK_FEE_PERCENTAGE, calculateFees } from "@llmgateway/shared";
 
 import { runFollowUpEmailsLoop } from "./services/follow-up-emails.js";
 import {
@@ -601,17 +601,29 @@ export async function batchProcessLogs(): Promise<void> {
 							currentOrgCost.plus(new Decimal(row.cost)),
 						);
 					} else if (row.used_mode === "api-keys") {
-						// In API keys mode, only deduct storage cost (data retention billing)
+						// In API keys mode, charge BYOK fee (% of tracked cost) + storage cost
+						let totalToDeduct = new Decimal(0);
+
+						// Add BYOK fee (e.g., 5% of the tracked cost)
+						if (row.cost) {
+							const byokFee = new Decimal(row.cost).times(BYOK_FEE_PERCENTAGE);
+							totalToDeduct = totalToDeduct.plus(byokFee);
+						}
+
+						// Add storage cost if applicable
 						if (row.data_storage_cost) {
-							const storageCost = new Decimal(row.data_storage_cost);
-							if (storageCost.greaterThan(0)) {
-								const currentOrgCost =
-									orgCosts.get(row.organization_id) ?? new Decimal(0);
-								orgCosts.set(
-									row.organization_id,
-									currentOrgCost.plus(storageCost),
-								);
-							}
+							totalToDeduct = totalToDeduct.plus(
+								new Decimal(row.data_storage_cost),
+							);
+						}
+
+						if (totalToDeduct.greaterThan(0)) {
+							const currentOrgCost =
+								orgCosts.get(row.organization_id) ?? new Decimal(0);
+							orgCosts.set(
+								row.organization_id,
+								currentOrgCost.plus(totalToDeduct),
+							);
 						}
 					}
 				}
