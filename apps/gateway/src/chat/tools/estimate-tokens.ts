@@ -23,26 +23,33 @@ export function estimateTokens(
 	if (!promptTokens || !completionTokens) {
 		// Estimate prompt tokens using encodeChat for better accuracy
 		if (!promptTokens && messages && messages.length > 0) {
+			let mappingDone = false;
 			try {
 				// Convert messages to the format expected by gpt-tokenizer
 				const chatMessages: ChatMessage[] = messages.map((m) => ({
 					role: m.role,
 					content:
-						typeof m.content === "string"
-							? m.content
-							: JSON.stringify(m.content),
-					name: m.name,
+						m.content === null || m.content === undefined
+							? ""
+							: typeof m.content === "string"
+								? m.content
+								: (JSON.stringify(m.content) ?? ""),
+					...(m.name !== null && m.name !== undefined && { name: m.name }),
 				}));
+				mappingDone = true;
 				calculatedPromptTokens = encodeChat(
 					chatMessages,
 					DEFAULT_TOKENIZER_MODEL,
 				).length;
 			} catch (error) {
 				// Fallback to simple estimation if encoding fails
-				logger.error(
-					"Failed to encode chat messages in estimate tokens",
-					error instanceof Error ? error : new Error(String(error)),
-				);
+				logger.error("Failed to encode chat messages in estimateTokens", {
+					error: error instanceof Error ? error.message : String(error),
+					messageCount: messages.length,
+					messageRoles: messages.map((m) => m.role),
+					messageContentTypes: messages.map((m) => typeof m.content),
+					failedDuringMapping: !mappingDone,
+				});
 				calculatedPromptTokens =
 					messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0) / 4;
 			}
