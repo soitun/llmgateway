@@ -11,6 +11,7 @@ import {
 	MoreVerticalIcon,
 	Loader2,
 	ImagePlus,
+	PenTool,
 } from "lucide-react";
 // import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -402,6 +403,16 @@ export function ChatSidebar({
 						<Link href="/image">
 							<ImagePlus className="h-4 w-4" />
 							Image Studio
+						</Link>
+					</Button>
+					<Button
+						variant="ghost"
+						className="w-full flex items-center gap-2"
+						asChild
+					>
+						<Link href="/canvas">
+							<PenTool className="h-4 w-4" />
+							Canvas
 						</Link>
 					</Button>
 				</div>
