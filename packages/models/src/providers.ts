@@ -6,6 +6,21 @@ export interface ProviderEnvConfig {
 	optional?: Record<string, string>;
 }
 
+/**
+ * Region routing configuration for providers that support multiple geographic endpoints.
+ * Used by the gateway for endpoint URL resolution and by the UI for the region selector.
+ */
+export interface ProviderRegionConfig {
+	/** Key in ProviderKeyOptions where the selected region is stored (e.g. "alibaba_region") */
+	optionsKey: string;
+	/** Region used when none is explicitly configured */
+	defaultRegion: string;
+	/** Ordered list of available regions for this provider, used to populate the UI dropdown */
+	regions: { id: string; label: string }[];
+	/** Maps region id to its base URL */
+	endpointMap: Record<string, string>;
+}
+
 export interface ProviderDefinition {
 	id: string;
 	name: string;
@@ -29,6 +44,8 @@ export interface ProviderDefinition {
 	// Priority weight for routing (default: 1). Lower values deprioritize the provider.
 	// e.g., 0.8 means 20% lower priority (score multiplied by 1/0.8 = 1.25)
 	priority?: number;
+	/** Region routing config - when set, provider supports multiple geographic endpoints */
+	regionConfig?: ProviderRegionConfig;
 }
 
 export const providers = [
@@ -204,12 +221,29 @@ export const providers = [
 			required: {
 				apiKey: "LLM_ALIBABA_API_KEY",
 			},
+			optional: {
+				region: "LLM_ALIBABA_REGION",
+			},
 		},
 		streaming: true,
 		cancellation: true,
 		color: "#FF6A00",
 		website: "https://www.alibabacloud.com",
 		announcement: null,
+		regionConfig: {
+			optionsKey: "alibaba_region",
+			defaultRegion: "singapore",
+			regions: [
+				{ id: "singapore", label: "Singapore (default)" },
+				{ id: "us-virginia", label: "US (Virginia)" },
+				{ id: "cn-beijing", label: "China (Beijing)" },
+			],
+			endpointMap: {
+				singapore: "https://dashscope-intl.aliyuncs.com",
+				"us-virginia": "https://dashscope-us.aliyuncs.com",
+				"cn-beijing": "https://dashscope.aliyuncs.com",
+			},
+		},
 	},
 	{
 		id: "novita",

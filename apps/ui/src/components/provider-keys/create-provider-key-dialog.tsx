@@ -25,7 +25,11 @@ import {
 import { toast } from "@/lib/components/use-toast";
 import { useApi } from "@/lib/fetch-client";
 
-import { providers, type ProviderDefinition } from "@llmgateway/models";
+import {
+	providers,
+	type ProviderDefinition,
+	type ProviderRegionConfig,
+} from "@llmgateway/models";
 
 import { ProviderSelect } from "./provider-select";
 
@@ -72,6 +76,7 @@ export function CreateProviderKeyDialog({
 	>("ai-foundry");
 	const [azureValidationModel, setAzureValidationModel] =
 		useState("gpt-4o-mini");
+	const [selectedRegion, setSelectedRegion] = useState("");
 	const [isValidating, setIsValidating] = useState(false);
 
 	const api = useApi();
@@ -161,6 +166,7 @@ export function CreateProviderKeyDialog({
 				azure_api_version?: string;
 				azure_deployment_type?: "openai" | "ai-foundry";
 				azure_validation_model?: string;
+				[key: string]: string | undefined;
 			};
 			organizationId: string;
 		} = {
@@ -179,6 +185,17 @@ export function CreateProviderKeyDialog({
 				aws_bedrock_region_prefix: awsBedrockRegionPrefix,
 			};
 		}
+		// Include region in options for providers that support it
+		const providerDef = providers.find((p) => p.id === selectedProvider) as
+			| ProviderDefinition
+			| undefined;
+		if (providerDef?.regionConfig && selectedRegion) {
+			payload.options = {
+				...payload.options,
+				[providerDef.regionConfig.optionsKey]: selectedRegion,
+			};
+		}
+
 		if (selectedProvider === "azure") {
 			if (!azureResource) {
 				toast({
@@ -415,6 +432,43 @@ export function CreateProviderKeyDialog({
 							</div>
 						</>
 					)}
+
+					{(() => {
+						const providerWithRegion = providers.find(
+							(p) => p.id === selectedProvider,
+						) as ProviderDefinition | undefined;
+						const rc = providerWithRegion?.regionConfig as
+							| ProviderRegionConfig
+							| undefined;
+						if (!rc) {
+							return null;
+						}
+						const effectiveRegion = selectedRegion || rc.defaultRegion;
+						return (
+							<div className="space-y-2">
+								<Label htmlFor="provider-region">Region</Label>
+								<Select
+									value={effectiveRegion}
+									onValueChange={setSelectedRegion}
+								>
+									<SelectTrigger id="provider-region">
+										<SelectValue placeholder="Select region" />
+									</SelectTrigger>
+									<SelectContent>
+										{rc.regions.map((r) => (
+											<SelectItem key={r.id} value={r.id}>
+												{r.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+								<p className="text-sm text-muted-foreground">
+									API keys are region-specific. Make sure your key matches the
+									selected region.
+								</p>
+							</div>
+						);
+					})()}
 
 					{selectedProvider === "custom" && (
 						<>

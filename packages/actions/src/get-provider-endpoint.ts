@@ -1,5 +1,6 @@
 import {
 	models,
+	providers,
 	type ProviderModelMapping,
 	type ProviderId,
 	getProviderEnvValue,
@@ -99,14 +100,28 @@ export function getProviderEndpoint(
 			case "moonshot":
 				url = "https://api.moonshot.ai";
 				break;
-			case "alibaba":
+			case "alibaba": {
+				const alibabaProviderDef = providers.find((p) => p.id === "alibaba");
+				const alibabaRegionConfig = alibabaProviderDef?.regionConfig;
+				const alibabaRegion =
+					providerKeyOptions?.alibaba_region ??
+					getProviderEnvValue("alibaba", "region", configIndex) ??
+					alibabaRegionConfig?.defaultRegion ??
+					"singapore";
+				const alibabaBaseUrl =
+					(
+						alibabaRegionConfig?.endpointMap as
+							| Record<string, string>
+							| undefined
+					)?.[alibabaRegion] ?? "https://dashscope-intl.aliyuncs.com";
 				// Use different base URL for image generation vs chat completions
 				if (imageGenerations) {
-					url = "https://dashscope-intl.aliyuncs.com";
+					url = alibabaBaseUrl;
 				} else {
-					url = "https://dashscope-intl.aliyuncs.com/compatible-mode";
+					url = `${alibabaBaseUrl}/compatible-mode`;
 				}
 				break;
+			}
 			case "nebius":
 				url = "https://api.studio.nebius.com";
 				break;

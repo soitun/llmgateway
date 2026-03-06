@@ -15,6 +15,14 @@ export const alibabaModels = [
 				discount: 0.2,
 				inputPrice: 1.6 / 1e6,
 				outputPrice: 6.4 / 1e6,
+				regions: [
+					{ id: "singapore", inputPrice: 1.6 / 1e6, outputPrice: 6.4 / 1e6 },
+					{
+						id: "cn-beijing",
+						inputPrice: 0.345 / 1e6,
+						outputPrice: 1.377 / 1e6,
+					},
+				],
 				requestPrice: 0,
 				contextSize: 131072,
 				maxOutput: 32000,
@@ -39,6 +47,14 @@ export const alibabaModels = [
 				discount: 0.2,
 				inputPrice: 1.6 / 1e6,
 				outputPrice: 6.4 / 1e6,
+				regions: [
+					{ id: "singapore", inputPrice: 1.6 / 1e6, outputPrice: 6.4 / 1e6 },
+					{
+						id: "cn-beijing",
+						inputPrice: 0.345 / 1e6,
+						outputPrice: 1.377 / 1e6,
+					},
+				],
 				requestPrice: 0,
 				contextSize: 131072,
 				maxOutput: 32000,
@@ -63,6 +79,74 @@ export const alibabaModels = [
 				inputPrice: 0.4 / 1e6,
 				outputPrice: 1.2 / 1e6,
 				cachedInputPrice: 0.08 / 1e6,
+				regions: [
+					{
+						id: "singapore",
+						inputPrice: 0.4 / 1e6,
+						outputPrice: 1.2 / 1e6,
+						cachedInputPrice: 0.08 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.4 / 1e6,
+								outputPrice: 1.2 / 1e6,
+								cachedInputPrice: 0.08 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 1.2 / 1e6,
+								outputPrice: 3.6 / 1e6,
+								cachedInputPrice: 0.24 / 1e6,
+							},
+						],
+					},
+					{
+						id: "us-virginia",
+						inputPrice: 0.115 / 1e6,
+						outputPrice: 0.287 / 1e6,
+						cachedInputPrice: 0.023 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.115 / 1e6,
+								outputPrice: 0.287 / 1e6,
+								cachedInputPrice: 0.023 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.345 / 1e6,
+								outputPrice: 0.861 / 1e6,
+								cachedInputPrice: 0.069 / 1e6,
+							},
+						],
+					},
+					{
+						id: "cn-beijing",
+						inputPrice: 0.115 / 1e6,
+						outputPrice: 0.287 / 1e6,
+						cachedInputPrice: 0.023 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.115 / 1e6,
+								outputPrice: 0.287 / 1e6,
+								cachedInputPrice: 0.023 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.345 / 1e6,
+								outputPrice: 0.861 / 1e6,
+								cachedInputPrice: 0.069 / 1e6,
+							},
+						],
+					},
+				],
 				pricingTiers: [
 					{
 						name: "Up to 256K",
@@ -103,6 +187,74 @@ export const alibabaModels = [
 				inputPrice: 0.4 / 1e6,
 				outputPrice: 1.2 / 1e6,
 				cachedInputPrice: 0.08 / 1e6,
+				regions: [
+					{
+						id: "singapore",
+						inputPrice: 0.4 / 1e6,
+						outputPrice: 1.2 / 1e6,
+						cachedInputPrice: 0.08 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.4 / 1e6,
+								outputPrice: 1.2 / 1e6,
+								cachedInputPrice: 0.08 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 1.2 / 1e6,
+								outputPrice: 3.6 / 1e6,
+								cachedInputPrice: 0.24 / 1e6,
+							},
+						],
+					},
+					{
+						id: "us-virginia",
+						inputPrice: 0.115 / 1e6,
+						outputPrice: 0.287 / 1e6,
+						cachedInputPrice: 0.023 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.115 / 1e6,
+								outputPrice: 0.287 / 1e6,
+								cachedInputPrice: 0.023 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.345 / 1e6,
+								outputPrice: 0.861 / 1e6,
+								cachedInputPrice: 0.069 / 1e6,
+							},
+						],
+					},
+					{
+						id: "cn-beijing",
+						inputPrice: 0.115 / 1e6,
+						outputPrice: 0.287 / 1e6,
+						cachedInputPrice: 0.023 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.115 / 1e6,
+								outputPrice: 0.287 / 1e6,
+								cachedInputPrice: 0.023 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.345 / 1e6,
+								outputPrice: 0.861 / 1e6,
+								cachedInputPrice: 0.069 / 1e6,
+							},
+						],
+					},
+				],
 				pricingTiers: [
 					{
 						name: "Up to 256K",
@@ -143,6 +295,74 @@ export const alibabaModels = [
 				inputPrice: 0.05 / 1e6,
 				outputPrice: 0.4 / 1e6,
 				cachedInputPrice: 0.01 / 1e6,
+				regions: [
+					{
+						id: "singapore",
+						inputPrice: 0.05 / 1e6,
+						outputPrice: 0.4 / 1e6,
+						cachedInputPrice: 0.01 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.05 / 1e6,
+								outputPrice: 0.4 / 1e6,
+								cachedInputPrice: 0.01 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.25 / 1e6,
+								outputPrice: 2.0 / 1e6,
+								cachedInputPrice: 0.05 / 1e6,
+							},
+						],
+					},
+					{
+						id: "us-virginia",
+						inputPrice: 0.022 / 1e6,
+						outputPrice: 0.216 / 1e6,
+						cachedInputPrice: 0.0044 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.022 / 1e6,
+								outputPrice: 0.216 / 1e6,
+								cachedInputPrice: 0.0044 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.11 / 1e6,
+								outputPrice: 1.08 / 1e6,
+								cachedInputPrice: 0.022 / 1e6,
+							},
+						],
+					},
+					{
+						id: "cn-beijing",
+						inputPrice: 0.022 / 1e6,
+						outputPrice: 0.216 / 1e6,
+						cachedInputPrice: 0.0044 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 256K",
+								upToTokens: 256000,
+								inputPrice: 0.022 / 1e6,
+								outputPrice: 0.216 / 1e6,
+								cachedInputPrice: 0.0044 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.11 / 1e6,
+								outputPrice: 1.08 / 1e6,
+								cachedInputPrice: 0.022 / 1e6,
+							},
+						],
+					},
+				],
 				pricingTiers: [
 					{
 						name: "Up to 256K",
@@ -205,6 +425,14 @@ export const alibabaModels = [
 				discount: 0.2,
 				inputPrice: 0.05 / 1e6,
 				outputPrice: 0.2 / 1e6,
+				regions: [
+					{ id: "singapore", inputPrice: 0.05 / 1e6, outputPrice: 0.2 / 1e6 },
+					{
+						id: "cn-beijing",
+						inputPrice: 0.044 / 1e6,
+						outputPrice: 0.087 / 1e6,
+					},
+				],
 				requestPrice: 0,
 				contextSize: 1000000,
 				maxOutput: 8192,
@@ -1064,6 +1292,19 @@ export const alibabaModels = [
 				discount: 0.2,
 				inputPrice: 0.6 / 1e6,
 				outputPrice: 3.6 / 1e6,
+				regions: [
+					{ id: "singapore", inputPrice: 0.6 / 1e6, outputPrice: 3.6 / 1e6 },
+					{
+						id: "us-virginia",
+						inputPrice: 0.143 / 1e6,
+						outputPrice: 0.573 / 1e6,
+					},
+					{
+						id: "cn-beijing",
+						inputPrice: 0.143 / 1e6,
+						outputPrice: 0.573 / 1e6,
+					},
+				],
 				requestPrice: 0,
 				contextSize: 262144,
 				maxOutput: 65536,
@@ -1211,6 +1452,14 @@ export const alibabaModels = [
 				discount: 0.2,
 				inputPrice: 0.8 / 1e6,
 				outputPrice: 2.4 / 1e6,
+				regions: [
+					{ id: "singapore", inputPrice: 0.8 / 1e6, outputPrice: 2.4 / 1e6 },
+					{
+						id: "cn-beijing",
+						inputPrice: 0.23 / 1e6,
+						outputPrice: 0.574 / 1e6,
+					},
+				],
 				requestPrice: 0,
 				contextSize: 131072,
 				maxOutput: 8192,
@@ -1237,6 +1486,9 @@ export const alibabaModels = [
 				discount: 0.2,
 				inputPrice: 1.0 / 1e6,
 				outputPrice: 5.0 / 1e6,
+				regions: [
+					{ id: "cn-beijing", inputPrice: 1.0 / 1e6, outputPrice: 5.0 / 1e6 },
+				],
 				requestPrice: 0,
 				contextSize: 131072,
 				maxOutput: 8192,
@@ -1261,6 +1513,116 @@ export const alibabaModels = [
 				inputPrice: 0.3 / 1e6,
 				outputPrice: 1.5 / 1e6,
 				cachedInputPrice: 0.06 / 1e6,
+				regions: [
+					{
+						id: "singapore",
+						inputPrice: 0.3 / 1e6,
+						outputPrice: 1.5 / 1e6,
+						cachedInputPrice: 0.06 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.3 / 1e6,
+								outputPrice: 1.5 / 1e6,
+								cachedInputPrice: 0.06 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.5 / 1e6,
+								outputPrice: 2.5 / 1e6,
+								cachedInputPrice: 0.1 / 1e6,
+							},
+							{
+								name: "128K-256K",
+								upToTokens: 256000,
+								inputPrice: 0.8 / 1e6,
+								outputPrice: 4.0 / 1e6,
+								cachedInputPrice: 0.16 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 1.6 / 1e6,
+								outputPrice: 9.6 / 1e6,
+								cachedInputPrice: 0.32 / 1e6,
+							},
+						],
+					},
+					{
+						id: "us-virginia",
+						inputPrice: 0.144 / 1e6,
+						outputPrice: 0.574 / 1e6,
+						cachedInputPrice: 0.029 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.144 / 1e6,
+								outputPrice: 0.574 / 1e6,
+								cachedInputPrice: 0.029 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.24 / 1e6,
+								outputPrice: 0.957 / 1e6,
+								cachedInputPrice: 0.048 / 1e6,
+							},
+							{
+								name: "128K-256K",
+								upToTokens: 256000,
+								inputPrice: 0.384 / 1e6,
+								outputPrice: 1.53 / 1e6,
+								cachedInputPrice: 0.077 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.768 / 1e6,
+								outputPrice: 3.67 / 1e6,
+								cachedInputPrice: 0.154 / 1e6,
+							},
+						],
+					},
+					{
+						id: "cn-beijing",
+						inputPrice: 0.144 / 1e6,
+						outputPrice: 0.574 / 1e6,
+						cachedInputPrice: 0.029 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.144 / 1e6,
+								outputPrice: 0.574 / 1e6,
+								cachedInputPrice: 0.029 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.24 / 1e6,
+								outputPrice: 0.957 / 1e6,
+								cachedInputPrice: 0.048 / 1e6,
+							},
+							{
+								name: "128K-256K",
+								upToTokens: 256000,
+								inputPrice: 0.384 / 1e6,
+								outputPrice: 1.53 / 1e6,
+								cachedInputPrice: 0.077 / 1e6,
+							},
+							{
+								name: "Over 256K",
+								upToTokens: Infinity,
+								inputPrice: 0.768 / 1e6,
+								outputPrice: 3.67 / 1e6,
+								cachedInputPrice: 0.154 / 1e6,
+							},
+						],
+					},
+				],
 				pricingTiers: [
 					{
 						name: "Up to 32K",
@@ -1315,6 +1677,95 @@ export const alibabaModels = [
 				inputPrice: 0.2 / 1e6,
 				outputPrice: 1.6 / 1e6,
 				cachedInputPrice: 0.04 / 1e6,
+				regions: [
+					{
+						id: "singapore",
+						inputPrice: 0.2 / 1e6,
+						outputPrice: 1.6 / 1e6,
+						cachedInputPrice: 0.04 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.2 / 1e6,
+								outputPrice: 1.6 / 1e6,
+								cachedInputPrice: 0.04 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.3 / 1e6,
+								outputPrice: 2.4 / 1e6,
+								cachedInputPrice: 0.06 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 0.6 / 1e6,
+								outputPrice: 4.8 / 1e6,
+								cachedInputPrice: 0.12 / 1e6,
+							},
+						],
+					},
+					{
+						id: "us-virginia",
+						inputPrice: 0.143 / 1e6,
+						outputPrice: 1.434 / 1e6,
+						cachedInputPrice: 0.029 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.143 / 1e6,
+								outputPrice: 1.434 / 1e6,
+								cachedInputPrice: 0.029 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.215 / 1e6,
+								outputPrice: 2.151 / 1e6,
+								cachedInputPrice: 0.043 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 0.429 / 1e6,
+								outputPrice: 4.302 / 1e6,
+								cachedInputPrice: 0.086 / 1e6,
+							},
+						],
+					},
+					{
+						id: "cn-beijing",
+						inputPrice: 0.143 / 1e6,
+						outputPrice: 1.434 / 1e6,
+						cachedInputPrice: 0.029 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.143 / 1e6,
+								outputPrice: 1.434 / 1e6,
+								cachedInputPrice: 0.029 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.215 / 1e6,
+								outputPrice: 2.151 / 1e6,
+								cachedInputPrice: 0.043 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 0.429 / 1e6,
+								outputPrice: 4.302 / 1e6,
+								cachedInputPrice: 0.086 / 1e6,
+							},
+						],
+					},
+				],
 				pricingTiers: [
 					{
 						name: "Up to 32K",
@@ -1362,6 +1813,95 @@ export const alibabaModels = [
 				inputPrice: 0.05 / 1e6,
 				outputPrice: 0.4 / 1e6,
 				cachedInputPrice: 0.01 / 1e6,
+				regions: [
+					{
+						id: "singapore",
+						inputPrice: 0.05 / 1e6,
+						outputPrice: 0.4 / 1e6,
+						cachedInputPrice: 0.01 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.05 / 1e6,
+								outputPrice: 0.4 / 1e6,
+								cachedInputPrice: 0.01 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.075 / 1e6,
+								outputPrice: 0.6 / 1e6,
+								cachedInputPrice: 0.015 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 0.12 / 1e6,
+								outputPrice: 0.96 / 1e6,
+								cachedInputPrice: 0.024 / 1e6,
+							},
+						],
+					},
+					{
+						id: "us-virginia",
+						inputPrice: 0.022 / 1e6,
+						outputPrice: 0.215 / 1e6,
+						cachedInputPrice: 0.0044 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.022 / 1e6,
+								outputPrice: 0.215 / 1e6,
+								cachedInputPrice: 0.0044 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.033 / 1e6,
+								outputPrice: 0.323 / 1e6,
+								cachedInputPrice: 0.0066 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 0.053 / 1e6,
+								outputPrice: 0.516 / 1e6,
+								cachedInputPrice: 0.0106 / 1e6,
+							},
+						],
+					},
+					{
+						id: "cn-beijing",
+						inputPrice: 0.022 / 1e6,
+						outputPrice: 0.215 / 1e6,
+						cachedInputPrice: 0.0044 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.022 / 1e6,
+								outputPrice: 0.215 / 1e6,
+								cachedInputPrice: 0.0044 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.033 / 1e6,
+								outputPrice: 0.323 / 1e6,
+								cachedInputPrice: 0.0066 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 0.053 / 1e6,
+								outputPrice: 0.516 / 1e6,
+								cachedInputPrice: 0.0106 / 1e6,
+							},
+						],
+					},
+				],
 				pricingTiers: [
 					{
 						name: "Up to 32K",
@@ -1511,6 +2051,95 @@ export const alibabaModels = [
 				inputPrice: 1.2 / 1e6,
 				outputPrice: 6.0 / 1e6,
 				cachedInputPrice: 0.24 / 1e6,
+				regions: [
+					{
+						id: "singapore",
+						inputPrice: 1.2 / 1e6,
+						outputPrice: 6.0 / 1e6,
+						cachedInputPrice: 0.24 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 1.2 / 1e6,
+								outputPrice: 6.0 / 1e6,
+								cachedInputPrice: 0.24 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 2.4 / 1e6,
+								outputPrice: 12.0 / 1e6,
+								cachedInputPrice: 0.48 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 3.0 / 1e6,
+								outputPrice: 15.0 / 1e6,
+								cachedInputPrice: 0.6 / 1e6,
+							},
+						],
+					},
+					{
+						id: "us-virginia",
+						inputPrice: 0.359 / 1e6,
+						outputPrice: 1.434 / 1e6,
+						cachedInputPrice: 0.072 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.359 / 1e6,
+								outputPrice: 1.434 / 1e6,
+								cachedInputPrice: 0.072 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.718 / 1e6,
+								outputPrice: 2.868 / 1e6,
+								cachedInputPrice: 0.144 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 0.898 / 1e6,
+								outputPrice: 3.585 / 1e6,
+								cachedInputPrice: 0.18 / 1e6,
+							},
+						],
+					},
+					{
+						id: "cn-beijing",
+						inputPrice: 0.359 / 1e6,
+						outputPrice: 1.434 / 1e6,
+						cachedInputPrice: 0.072 / 1e6,
+						pricingTiers: [
+							{
+								name: "Up to 32K",
+								upToTokens: 32000,
+								inputPrice: 0.359 / 1e6,
+								outputPrice: 1.434 / 1e6,
+								cachedInputPrice: 0.072 / 1e6,
+							},
+							{
+								name: "32K-128K",
+								upToTokens: 128000,
+								inputPrice: 0.718 / 1e6,
+								outputPrice: 2.868 / 1e6,
+								cachedInputPrice: 0.144 / 1e6,
+							},
+							{
+								name: "Over 128K",
+								upToTokens: Infinity,
+								inputPrice: 0.898 / 1e6,
+								outputPrice: 3.585 / 1e6,
+								cachedInputPrice: 0.18 / 1e6,
+							},
+						],
+					},
+				],
 				pricingTiers: [
 					{
 						name: "Up to 32K",

@@ -47,6 +47,36 @@ export interface PricingTier {
 	cachedInputPrice?: number;
 }
 
+/**
+ * Pricing and availability for a specific geographic region.
+ * When defined on a ProviderModelMapping, the first entry is the default region.
+ * Top-level inputPrice/outputPrice always reflect the default (first) region
+ * for backwards compatibility.
+ */
+export interface ProviderRegion {
+	/**
+	 * Region identifier (e.g. "singapore", "us-virginia", "cn-beijing")
+	 */
+	id: string;
+	/**
+	 * Price per input token in USD for this region
+	 */
+	inputPrice: number;
+	/**
+	 * Price per output token in USD for this region
+	 */
+	outputPrice: number;
+	/**
+	 * Price per cached input token in USD for this region
+	 */
+	cachedInputPrice?: number;
+	/**
+	 * Context-length based pricing tiers for this region.
+	 * When absent, falls back to the mapping-level pricingTiers.
+	 */
+	pricingTiers?: PricingTier[];
+}
+
 export interface ProviderModelMapping {
 	providerId: (typeof providers)[number]["id"];
 	modelName: string;
@@ -179,6 +209,13 @@ export interface ProviderModelMapping {
 	 * When true, requests are routed to a provider-specific image generation endpoint.
 	 */
 	imageGenerations?: boolean;
+	/**
+	 * Available regions and their per-region pricing for this provider mapping.
+	 * The first entry is the default region. Top-level inputPrice/outputPrice
+	 * must match the first region's prices for backwards compatibility.
+	 * When absent, the provider uses a single global endpoint with no region routing.
+	 */
+	regions?: ProviderRegion[];
 }
 
 export type StabilityLevel = "stable" | "beta" | "unstable" | "experimental";

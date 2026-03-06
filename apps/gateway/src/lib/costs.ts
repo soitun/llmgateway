@@ -8,6 +8,7 @@ import {
 	models,
 	type PricingTier,
 	type ToolCall,
+	type ProviderRegion,
 } from "@llmgateway/models";
 
 // Define ChatMessage type to match what gpt-tokenizer expects
@@ -100,6 +101,7 @@ export async function calculateCosts(
 	inputImageCount = 0,
 	webSearchCount: number | null = null,
 	organizationId: string | null = null,
+	region: string | null = null,
 ) {
 	// Find the model info - try both base model name and provider model name
 	let modelInfo = models.find((m) => m.id === model) as ModelDefinition;
@@ -249,12 +251,19 @@ export async function calculateCosts(
 		};
 	}
 
+	// Resolve region-specific pricing when available
+	let regionPricing: ProviderRegion | undefined;
+	if (region && providerInfo.regions && providerInfo.regions.length > 0) {
+		regionPricing = providerInfo.regions.find((r) => r.id === region);
+	}
+
 	// Get pricing based on token count (supports tiered pricing)
+	// Region-specific pricing takes precedence over mapping-level pricing
 	const pricing = getPricingForTokenCount(
-		providerInfo.pricingTiers,
-		providerInfo.inputPrice ?? 0,
-		providerInfo.outputPrice ?? 0,
-		providerInfo.cachedInputPrice,
+		regionPricing?.pricingTiers ?? providerInfo.pricingTiers,
+		regionPricing?.inputPrice ?? providerInfo.inputPrice ?? 0,
+		regionPricing?.outputPrice ?? providerInfo.outputPrice ?? 0,
+		regionPricing?.cachedInputPrice ?? providerInfo.cachedInputPrice,
 		calculatedPromptTokens,
 	);
 

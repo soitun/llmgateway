@@ -1384,6 +1384,7 @@ chat.openapi(completions, async (c) => {
 	let usedToken: string | undefined;
 	let configIndex = 0; // Index for round-robin environment variables
 	let envVarName: string | undefined; // Environment variable name for health tracking
+	let usedRegion: string | undefined;
 
 	if (
 		project.mode === "credits" &&
@@ -1742,6 +1743,7 @@ chat.openapi(completions, async (c) => {
 					inputImageCount,
 					null, // webSearchCount
 					project.organizationId,
+					usedRegion ?? null,
 				);
 
 				await insertLog({
@@ -1892,6 +1894,7 @@ chat.openapi(completions, async (c) => {
 					inputImageCount,
 					null, // webSearchCount
 					project.organizationId,
+					usedRegion ?? null,
 				);
 
 				// Estimate cached response size based on content to avoid expensive stringify
@@ -2585,6 +2588,7 @@ chat.openapi(completions, async (c) => {
 									inputImageCount,
 									webSearchTool ? 1 : null, // Bill for web search if it was enabled
 									project.organizationId,
+									usedRegion ?? null,
 								);
 							}
 
@@ -3591,6 +3595,7 @@ chat.openapi(completions, async (c) => {
 										inputImageCount,
 										webSearchCount,
 										project.organizationId,
+										usedRegion ?? null,
 									);
 
 									// Include costs in response for all users
@@ -4641,6 +4646,7 @@ chat.openapi(completions, async (c) => {
 									inputImageCount,
 									webSearchCount,
 									project.organizationId,
+									usedRegion ?? null,
 								);
 
 					// Use costs.promptTokens as canonical value (includes image input
@@ -4962,6 +4968,7 @@ chat.openapi(completions, async (c) => {
 				top_p = ctx.top_p;
 				frequency_penalty = ctx.frequency_penalty;
 				presence_penalty = ctx.presence_penalty;
+				usedRegion = ctx.usedRegion;
 			} catch {
 				failedProviderIds.add(nextProvider.providerId);
 				// Don't consume a retry slot for context-resolution failures
@@ -5221,6 +5228,7 @@ chat.openapi(completions, async (c) => {
 					inputImageCount,
 					webSearchTool ? 1 : null, // Bill for web search if it was enabled
 					project.organizationId,
+					usedRegion ?? null,
 				);
 			}
 
@@ -5951,6 +5959,7 @@ chat.openapi(completions, async (c) => {
 		inputImageCount,
 		webSearchCount,
 		project.organizationId,
+		usedRegion ?? null,
 	);
 
 	// Use costs.promptTokens as canonical value (includes image input

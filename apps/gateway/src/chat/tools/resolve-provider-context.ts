@@ -12,11 +12,13 @@ import {
 } from "@llmgateway/actions";
 import {
 	type BaseMessage,
+	getProviderEnvValue,
 	hasMaxTokens,
 	type ModelDefinition,
 	type OpenAIRequestBody,
 	type OpenAIToolInput,
 	type Provider,
+	type ProviderDefinition,
 	type ProviderModelMapping,
 	type ProviderRequestBody,
 	providers,
@@ -50,6 +52,7 @@ export interface ProviderContext {
 	frequency_penalty: number | undefined;
 	presence_penalty: number | undefined;
 	headers: Record<string, string>;
+	usedRegion: string | undefined;
 }
 
 export interface OriginalRequestParams {
@@ -178,6 +181,37 @@ export async function resolveProviderContext(
 	const providerMappingForSelected = modelInfo.providers.find(
 		(p) => p.providerId === usedProvider && p.modelName === usedModel,
 	);
+
+	// --- Region resolution ---
+	const providerDef = providers.find((p) => p.id === usedProvider) as
+		| ProviderDefinition
+		| undefined;
+	const regionConfig = providerDef?.regionConfig;
+	let usedRegion: string | undefined;
+	if (regionConfig) {
+		const optionsKey = regionConfig.optionsKey;
+		const keyOptions = providerKey?.options as
+			| Record<string, string | undefined>
+			| null
+			| undefined;
+		usedRegion =
+			keyOptions?.[optionsKey] ??
+			getProviderEnvValue(usedProvider as Provider, "region", configIndex) ??
+			regionConfig.defaultRegion;
+
+		// Validate that the selected region is supported by this model mapping
+		const modelRegions = (providerMappingForSelected as ProviderModelMapping)
+			?.regions;
+		if (modelRegions && modelRegions.length > 0) {
+			const isValidRegion = modelRegions.some((r) => r.id === usedRegion);
+			if (!isValidRegion) {
+				const validIds = modelRegions.map((r) => r.id).join(", ");
+				throw new HTTPException(400, {
+					message: `Model "${baseModelName}" is not available in region "${usedRegion}". Available regions: ${validIds}`,
+				});
+			}
+		}
+	}
 
 	// --- Check if model supports reasoning (from selected provider, not any) ---
 	const supportsReasoning =
@@ -361,5 +395,6 @@ export async function resolveProviderContext(
 		frequency_penalty,
 		presence_penalty,
 		headers,
+		usedRegion,
 	};
 }
