@@ -541,6 +541,8 @@ export const log = pgTable(
 		}>(),
 		retried: boolean().default(false),
 		retriedByLogId: text(),
+		responsesApiId: text(),
+		responsesApiData: jsonb(),
 	},
 	(table) => [
 		index("log_project_id_created_at_idx").on(table.projectId, table.createdAt),
