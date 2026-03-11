@@ -541,7 +541,6 @@ export const log = pgTable(
 		}>(),
 		retried: boolean().default(false),
 		retriedByLogId: text(),
-		responsesApiId: text(),
 		responsesApiData: jsonb(),
 	},
 	(table) => [
