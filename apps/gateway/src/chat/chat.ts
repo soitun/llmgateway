@@ -433,12 +433,14 @@ chat.openapi(completions, async (c) => {
 		}
 	}
 
-	// Wrapper that injects Responses API fields into every log entry
+	// Wrapper that injects Responses API fields into every log entry.
+	// Only override the id for the final log entry (retried !== true) to avoid
+	// PK conflicts when the request retries across multiple providers.
 	const insertLogEntry = (logData: LogInsertData) =>
 		insertLog(
 			{
 				...logData,
-				...(logIdOverride ? { id: logIdOverride } : {}),
+				...(logIdOverride && !logData.retried ? { id: logIdOverride } : {}),
 				responsesApiData,
 			},
 			{ syncInsert: syncLogInsert },
@@ -2350,7 +2352,7 @@ chat.openapi(completions, async (c) => {
 				const routingAttempts: RoutingAttempt[] = [];
 				const failedProviderIds = new Set<string>();
 				let res: Response | undefined;
-				const finalLogId = shortid();
+				const finalLogId = logIdOverride ?? shortid();
 				for (
 					let retryAttempt = 0;
 					retryAttempt <= MAX_RETRIES;
@@ -4951,7 +4953,7 @@ chat.openapi(completions, async (c) => {
 	let isTimeoutFetchError = false;
 	let res: Response | undefined;
 	let duration = 0;
-	const finalLogId = shortid();
+	const finalLogId = logIdOverride ?? shortid();
 	for (let retryAttempt = 0; retryAttempt <= MAX_RETRIES; retryAttempt++) {
 		const perAttemptStartTime = Date.now();
 
