@@ -18,6 +18,7 @@ import { isCodingModel } from "@/lib/coding-models.js";
 import { calculateCosts, shouldBillCancelledRequests } from "@/lib/costs.js";
 import { throwIamException, validateModelAccess } from "@/lib/iam.js";
 import { calculateDataStorageCost, insertLog } from "@/lib/logs.js";
+import { getResponsesContext } from "@/lib/responses-context.js";
 import {
 	createCombinedSignal,
 	createStreamingCombinedSignal,
@@ -420,18 +421,15 @@ chat.openapi(completions, async (c) => {
 	// Extract custom X-LLMGateway-* headers
 	const customHeaders = extractCustomHeaders(c);
 
-	// Extract Responses API headers (set by /v1/responses proxy)
-	const syncLogInsert = c.req.header("x-sync-log-insert") === "true";
-	const logIdOverride = c.req.header("x-log-id") ?? undefined;
-	const responsesApiDataHeader = c.req.header("x-responses-api-data");
-	let responsesApiData: unknown = null;
-	if (responsesApiDataHeader) {
-		try {
-			responsesApiData = JSON.parse(responsesApiDataHeader);
-		} catch {
-			// Ignore malformed header
-		}
-	}
+	// Read Responses API context from in-memory Map (set by /v1/responses proxy).
+	// Uses a lookup key passed via header; actual data is never in headers.
+	const responsesContextKey = c.req.header("x-responses-context-key");
+	const responsesContext = responsesContextKey
+		? getResponsesContext(responsesContextKey)
+		: undefined;
+	const syncLogInsert = responsesContext?.syncInsert ?? false;
+	const logIdOverride = responsesContext?.logId;
+	const responsesApiData: unknown = responsesContext?.responsesApiData ?? null;
 
 	// Wrapper that injects Responses API fields into every log entry.
 	// Only override the id for the final log entry (retried !== true) to avoid
