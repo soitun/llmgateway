@@ -4,7 +4,7 @@
  * 429 status codes indicate upstream rate limiting (treated as upstream error)
  * 404 status codes indicate model/endpoint not found at provider (treated as upstream error)
  * 401/403 status codes indicate authentication/authorization issues (gateway configuration errors)
- * Other 4xx status codes indicate client/gateway errors
+ * Other 4xx status codes indicate upstream provider request rejections
  * Special client errors (like JSON format validation) are classified as client_error
  *
  * Note: Error classification is separate from health tracking. The health tracking system
@@ -27,6 +27,11 @@ export function getFinishReasonFromError(
 	// 404 from upstream provider indicates model/endpoint not found at provider
 	if (statusCode === 404) {
 		return "upstream_error";
+	}
+
+	// 401/403 indicate gateway/provider credential or permission problems
+	if (statusCode === 401 || statusCode === 403) {
+		return "gateway_error";
 	}
 
 	// Azure OpenAI content filter (ResponsibleAIPolicyViolation)
@@ -62,5 +67,5 @@ export function getFinishReasonFromError(
 		}
 	}
 
-	return "gateway_error";
+	return "upstream_error";
 }

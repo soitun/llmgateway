@@ -184,6 +184,37 @@ describe("fallback and error status code handling", () => {
 			expect(log.errorDetails?.responseText).toContain("rate_limit");
 		});
 
+		test("400 bad request is classified as upstream_error with correct error details in DB log", async () => {
+			await setupCustomKeys();
+
+			const res = await app.request("/v1/chat/completions", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer real-token",
+				},
+				body: JSON.stringify({
+					model: "llmgateway/custom",
+					messages: [{ role: "user", content: "TRIGGER_STATUS_400" }],
+				}),
+			});
+
+			expect(res.status).toBe(500);
+			const json = await res.json();
+			expect(json).toHaveProperty("error");
+			expect(json.error.type).toBe("upstream_error");
+
+			const logs = await waitForLogs(1);
+			expect(logs.length).toBe(1);
+
+			const log = logs[0];
+			expect(log.finishReason).toBe("upstream_error");
+			expect(log.hasError).toBe(true);
+			expect(log.errorDetails).toBeTruthy();
+			expect(log.errorDetails?.statusCode).toBe(400);
+			expect(log.errorDetails?.responseText).toContain("invalid_request");
+		});
+
 		test("404 not found is classified as upstream_error with correct error details in DB log", async () => {
 			await setupCustomKeys();
 
@@ -454,6 +485,41 @@ describe("fallback and error status code handling", () => {
 			expect(log.hasError).toBe(true);
 			expect(log.streamed).toBe(true);
 			expect(log.errorDetails?.statusCode).toBe(429);
+		});
+
+		test("streaming 400 bad request returns upstream_error SSE event and logs upstream_error", async () => {
+			await setupCustomKeys();
+
+			const res = await app.request("/v1/chat/completions", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer real-token",
+				},
+				body: JSON.stringify({
+					model: "llmgateway/custom",
+					messages: [{ role: "user", content: "TRIGGER_STATUS_400" }],
+					stream: true,
+				}),
+			});
+
+			expect(res.status).toBe(200);
+
+			const streamResult = await readAll(res.body);
+			expect(streamResult.hasError).toBe(true);
+			expect(streamResult.errorEvents.length).toBeGreaterThan(0);
+
+			const errorEvent = streamResult.errorEvents[0];
+			expect(errorEvent.error.type).toBe("upstream_error");
+
+			const logs = await waitForLogs(1);
+			expect(logs.length).toBe(1);
+
+			const log = logs[0];
+			expect(log.finishReason).toBe("upstream_error");
+			expect(log.hasError).toBe(true);
+			expect(log.streamed).toBe(true);
+			expect(log.errorDetails?.statusCode).toBe(400);
 		});
 	});
 
