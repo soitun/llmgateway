@@ -28,11 +28,11 @@ describe("isRetryableError", () => {
 		expect(isRetryableError(404)).toBe(true);
 	});
 
-	it("does not retry on client errors", () => {
-		expect(isRetryableError(400)).toBe(false);
-		expect(isRetryableError(401)).toBe(false);
-		expect(isRetryableError(403)).toBe(false);
-		expect(isRetryableError(422)).toBe(false);
+	it("retries on other 4xx provider errors", () => {
+		expect(isRetryableError(400)).toBe(true);
+		expect(isRetryableError(401)).toBe(true);
+		expect(isRetryableError(403)).toBe(true);
+		expect(isRetryableError(422)).toBe(true);
 	});
 
 	it("does not retry on success codes", () => {
@@ -68,8 +68,8 @@ describe("shouldRetryRequest", () => {
 	});
 
 	it("does not retry on non-retryable status codes", () => {
-		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 400 })).toBe(false);
-		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 422 })).toBe(false);
+		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 200 })).toBe(false);
+		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 302 })).toBe(false);
 	});
 
 	it("does not retry when max retries exceeded", () => {
@@ -112,6 +112,13 @@ describe("shouldRetryRequest", () => {
 
 	it("retries on 404 when the provider was auto-selected", () => {
 		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 404 })).toBe(true);
+	});
+
+	it("retries on 4xx when the provider was auto-selected", () => {
+		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 400 })).toBe(true);
+		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 401 })).toBe(true);
+		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 403 })).toBe(true);
+		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 422 })).toBe(true);
 	});
 });
 

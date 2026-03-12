@@ -15,14 +15,13 @@ export type FailedAttempt = RoutingAttempt;
 
 /**
  * Checks if an HTTP status code (or 0 for network errors) is retryable.
- * Retryable: 5xx server errors, 429 rate limits, 404 model-not-found/access drift,
- * 0 (network failures/timeouts).
- * NOT retryable: 400 (client error), 401/403 (auth).
+ * Retryable: any 4xx provider error, 5xx server errors, and 0
+ * (network failures/timeouts).
+ * Explicit provider requests are still handled separately and do not retry.
  */
 export function isRetryableError(statusCode: number): boolean {
 	return (
-		statusCode === 404 ||
-		statusCode === 429 ||
+		(statusCode >= 400 && statusCode < 500) ||
 		statusCode >= 500 ||
 		statusCode === 0
 	);
