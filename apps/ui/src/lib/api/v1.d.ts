@@ -294,6 +294,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/contact/enterprise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** Format: email */
+                        email: string;
+                        country: string;
+                        size: string;
+                        message: string;
+                        honeypot?: string;
+                        timestamp?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Enterprise contact request handled successfully */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success: boolean;
+                            message: string;
+                        };
+                    };
+                };
+                /** @description Submission rejected by validation or spam checks */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success: boolean;
+                            message: string;
+                        };
+                    };
+                };
+                /** @description Submission rejected by rate limiting */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success: boolean;
+                            message: string;
+                        };
+                    };
+                };
+                /** @description Submission could not be processed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success: boolean;
+                            message: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/user/me": {
         parameters: {
             query?: never;

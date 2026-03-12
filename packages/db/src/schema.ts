@@ -255,6 +255,40 @@ export const followUpEmail = pgTable(
 	],
 );
 
+export const enterpriseContactSubmission = pgTable(
+	"enterprise_contact_submission",
+	{
+		id: text().primaryKey().notNull().$defaultFn(shortid),
+		createdAt: timestamp().notNull().defaultNow(),
+		updatedAt: timestamp()
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+		name: text().notNull(),
+		email: text().notNull(),
+		country: text().notNull(),
+		size: text().notNull(),
+		message: text().notNull(),
+		honeypot: text(),
+		clientTimestampMs: integer(),
+		ipAddress: text(),
+		userAgent: text(),
+		spamFilterStatus: text({
+			enum: ["pending", "rejected", "delivered", "delivery_failed"],
+		})
+			.notNull()
+			.default("pending"),
+		rejectionReason: text(),
+	},
+	(table) => [
+		index("enterprise_contact_submission_created_at_idx").on(table.createdAt),
+		index("enterprise_contact_submission_email_idx").on(table.email),
+		index("enterprise_contact_submission_status_idx").on(
+			table.spamFilterStatus,
+		),
+	],
+);
+
 export const userOrganization = pgTable(
 	"user_organization",
 	{
