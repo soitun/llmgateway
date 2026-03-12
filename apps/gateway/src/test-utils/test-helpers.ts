@@ -71,7 +71,7 @@ export async function waitForLogByRequestId(
 			.where(eq(tables.log.requestId, requestId))
 			.limit(1);
 
-		const log = logs[0] || null;
+		const log = logs[0] ?? null;
 
 		if (log) {
 			return log;

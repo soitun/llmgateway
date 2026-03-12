@@ -134,7 +134,7 @@ export function LogCard({
 								{log.content ??
 									(log.unifiedFinishReason === "tool_calls" && log.toolResults
 										? Array.isArray(log.toolResults)
-											? `Tool calls: ${log.toolResults.map((tr) => tr.function?.name || "unknown").join(", ")}`
+											? `Tool calls: ${log.toolResults.map((tr) => tr.function?.name ?? "unknown").join(", ")}`
 											: "Tool calls executed"
 										: "---")}
 							</p>
@@ -947,11 +947,11 @@ export function LogCard({
 															<div className="grid gap-2 text-xs">
 																<div className="flex justify-between">
 																	<span className="font-medium">
-																		{toolCall.function?.name ||
+																		{toolCall.function?.name ??
 																			"Unknown Function"}
 																	</span>
 																	<span className="text-muted-foreground">
-																		ID: {toolCall.id || "N/A"}
+																		ID: {toolCall.id ?? "N/A"}
 																	</span>
 																</div>
 																{toolCall.function?.arguments && (

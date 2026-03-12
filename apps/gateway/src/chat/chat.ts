@@ -859,7 +859,7 @@ chat.openapi(completions, async (c) => {
 				// Find the cheapest among the suitable providers for this model
 				for (const provider of suitableProviders) {
 					const totalPrice =
-						((provider.inputPrice || 0) + (provider.outputPrice || 0)) / 2;
+						((provider.inputPrice ?? 0) + (provider.outputPrice ?? 0)) / 2;
 
 					if (totalPrice < lowestPrice) {
 						lowestPrice = totalPrice;

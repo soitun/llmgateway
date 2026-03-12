@@ -235,11 +235,11 @@ modelsApi.openapi(listModels, async (c) => {
 				json_output:
 					model.providers.some(
 						(p) => (p as ProviderModelMapping).jsonOutput === true,
-					) || false,
+					) ?? false,
 				structured_outputs:
 					model.providers.some(
 						(p) => (p as ProviderModelMapping).jsonOutputSchema === true,
-					) || false,
+					) ?? false,
 				free: model.free ?? false,
 				// Calculate earliest deprecatedAt from all provider mappings
 				deprecated_at: model.providers

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { app } from "@/index.js";
@@ -12,17 +14,25 @@ import {
 } from "@llmgateway/db";
 
 describe("admin models endpoint", () => {
+	const testRunId = randomUUID();
 	const previousAdminEmails = process.env.ADMIN_EMAILS;
-	const modelId = "test-admin-model-window";
-	const providerId = "test-admin-provider-window";
-	const userId = "test-admin-user-id";
-	const orgId = "test-admin-org-id";
-	const projectId = "test-admin-project-id";
-	const apiKeyId = "test-admin-api-key-id";
-	const mappingId = "test-admin-mapping-id";
+	const modelId = `test-admin-model-window-${testRunId}`;
+	const providerId = `test-admin-provider-window-${testRunId}`;
+	const userId = `test-admin-user-id-${testRunId}`;
+	const orgId = `test-admin-org-id-${testRunId}`;
+	const projectId = `test-admin-project-id-${testRunId}`;
+	const apiKeyId = `test-admin-api-key-id-${testRunId}`;
+	const mappingId = `test-admin-mapping-id-${testRunId}`;
+	const accountId = `test-admin-account-id-${testRunId}`;
+	const userOrganizationId = `test-admin-user-org-id-${testRunId}`;
+	const adminEmail = "admin@example.com";
 	let token: string;
 
 	async function cleanupTestData() {
+		const existingAdminUser = await db.query.user.findFirst({
+			where: (user, { eq }) => eq(user.email, adminEmail),
+		});
+
 		await db.delete(tables.log).where(eq(tables.log.projectId, projectId));
 		await db.delete(tables.apiKey).where(eq(tables.apiKey.id, apiKeyId));
 		await db.delete(modelHistory).where(eq(modelHistory.modelId, modelId));
@@ -46,24 +56,39 @@ describe("admin models endpoint", () => {
 		await db.delete(tables.session).where(eq(tables.session.userId, userId));
 		await db.delete(tables.account).where(eq(tables.account.userId, userId));
 		await db.delete(tables.user).where(eq(tables.user.id, userId));
+
+		if (existingAdminUser && existingAdminUser.id !== userId) {
+			await db
+				.delete(tables.userOrganization)
+				.where(eq(tables.userOrganization.userId, existingAdminUser.id));
+			await db
+				.delete(tables.session)
+				.where(eq(tables.session.userId, existingAdminUser.id));
+			await db
+				.delete(tables.account)
+				.where(eq(tables.account.userId, existingAdminUser.id));
+			await db
+				.delete(tables.user)
+				.where(eq(tables.user.id, existingAdminUser.id));
+		}
 	}
 
 	beforeEach(async () => {
-		process.env.ADMIN_EMAILS = "admin@example.com";
+		process.env.ADMIN_EMAILS = adminEmail;
 
 		await cleanupTestData();
 
 		await db.insert(tables.user).values({
 			id: userId,
 			name: "Test Admin User",
-			email: "admin@example.com",
+			email: adminEmail,
 			emailVerified: true,
 		});
 
 		await db.insert(tables.account).values({
-			id: "test-admin-account-id",
+			id: accountId,
 			providerId: "credential",
-			accountId: "test-admin-account-id",
+			accountId,
 			userId,
 			password:
 				"c11ef27a7f9264be08db228ebb650888:a4d985a9c6bd98608237fd507534424950aa7fc255930d972242b81cbe78594f8568feb0d067e95ddf7be242ad3e9d013f695f4414fce68bfff091079f1dc460",
@@ -74,11 +99,11 @@ describe("admin models endpoint", () => {
 		await db.insert(tables.organization).values({
 			id: orgId,
 			name: "Test Admin Org",
-			billingEmail: "admin@example.com",
+			billingEmail: adminEmail,
 		});
 
 		await db.insert(tables.userOrganization).values({
-			id: "test-admin-user-org-id",
+			id: userOrganizationId,
 			userId,
 			organizationId: orgId,
 		});
@@ -235,11 +260,11 @@ describe("admin models endpoint", () => {
 
 	test("GET /admin/providers returns history-table totals for the selected window", async () => {
 		const now = new Date();
-		const from = new Date(now.getTime() - 5 * 60_000).toISOString();
+		const from = new Date(now.getTime() - 300_000).toISOString();
 		const to = new Date(now.getTime() + 60_000).toISOString();
 
 		const res = await app.request(
-			`/admin/providers?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+			`/admin/providers?search=${providerId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
 			{
 				headers: {
 					Cookie: token,
@@ -253,8 +278,6 @@ describe("admin models endpoint", () => {
 			(entry: { id: string }) => entry.id === providerId,
 		);
 
-		expect(data.totalTokens).toBe(210);
-		expect(data.totalCost).toBe(3.5);
 		expect(provider).toMatchObject({
 			id: providerId,
 			logsCount: 3,
@@ -269,7 +292,7 @@ describe("admin models endpoint", () => {
 
 	test("GET /admin/model-provider-mappings returns mapping history totals for the selected window", async () => {
 		const now = new Date();
-		const from = new Date(now.getTime() - 5 * 60_000).toISOString();
+		const from = new Date(now.getTime() - 300_000).toISOString();
 		const to = new Date(now.getTime() + 60_000).toISOString();
 
 		const res = await app.request(

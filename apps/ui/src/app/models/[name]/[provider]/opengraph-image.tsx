@@ -245,7 +245,8 @@ export default async function ModelProviderOgImage({ params }: ImageProps) {
 									>
 										{(
 											providerInfo?.name ??
-											(selectedMapping?.providerId || "LLM")
+											selectedMapping?.providerId ??
+											"LLM"
 										)
 											.charAt(0)
 											.toUpperCase()}

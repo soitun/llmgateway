@@ -118,7 +118,7 @@ export async function resolveProviderContext(
 ): Promise<ProviderContext> {
 	const usedProvider = providerMapping.providerId as Provider;
 	const usedModel = providerMapping.modelName;
-	const baseModelName = modelInfo.id || usedModel;
+	const baseModelName = modelInfo.id ?? usedModel;
 	const usedModelMapping = usedModel;
 	const usedModelFormatted = `${usedProvider}/${baseModelName}`;
 

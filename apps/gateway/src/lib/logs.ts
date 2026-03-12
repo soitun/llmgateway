@@ -212,11 +212,11 @@ export async function insertLog(logData: LogInsertData): Promise<unknown> {
 	);
 
 	recordChatCompletionMetrics({
-		model: logData.usedModel || "unknown",
-		provider: logData.usedProvider || "unknown",
+		model: logData.usedModel ?? "unknown",
+		provider: logData.usedProvider ?? "unknown",
 		finishReason: logData.finishReason ?? null,
 		streaming: logData.streamed ?? false,
-		durationMs: logData.duration || 0,
+		durationMs: logData.duration ?? 0,
 		ttftMs: logData.timeToFirstToken ?? undefined,
 		inputTokens: logData.promptTokens
 			? Number(logData.promptTokens)

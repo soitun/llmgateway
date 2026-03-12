@@ -156,9 +156,7 @@ const groupedProviders = modelDefinitions.reduce<
 >((acc, def) => {
 	def.providers.forEach((map) => {
 		const provider = providerDefinitions.find((p) => p.id === map.providerId)!;
-		if (!acc[provider.name]) {
-			acc[provider.name] = [];
-		}
+		acc[provider.name] ??= [];
 		acc[provider.name].push(convertToApiModel(def, map));
 	});
 	return acc;

@@ -332,10 +332,8 @@ function createMcpServer(apiKey: string): McpServer {
 				// Group by family
 				const byFamily = modelData.reduce(
 					(acc, model) => {
-						const family = model.family || "other";
-						if (!acc[family]) {
-							acc[family] = [];
-						}
+						const family = model.family ?? "other";
+						acc[family] ??= [];
 						acc[family].push(model);
 						return acc;
 					},

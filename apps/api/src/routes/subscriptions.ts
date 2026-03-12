@@ -553,10 +553,10 @@ subscriptions.openapi(getSubscriptionStatus, async (c) => {
 	}
 
 	return c.json({
-		plan: organization.plan || "free",
+		plan: organization.plan ?? "free",
 		subscriptionId: organization.stripeSubscriptionId,
 		planExpiresAt: organization.planExpiresAt?.toISOString() ?? null,
-		subscriptionCancelled: organization.subscriptionCancelled || false,
+		subscriptionCancelled: organization.subscriptionCancelled ?? false,
 		billingCycle,
 	});
 });

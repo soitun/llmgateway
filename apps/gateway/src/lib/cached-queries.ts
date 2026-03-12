@@ -105,9 +105,9 @@ export async function findOrganizationById(
 	// If org has 0 or negative credits, refetch without cache
 	// to ensure topups are reflected immediately
 	if (org) {
-		const regularCredits = parseFloat(org.credits || "0");
-		const devPlanCreditsUsed = parseFloat(org.devPlanCreditsUsed || "0");
-		const devPlanCreditsLimit = parseFloat(org.devPlanCreditsLimit || "0");
+		const regularCredits = parseFloat(org.credits ?? "0");
+		const devPlanCreditsUsed = parseFloat(org.devPlanCreditsUsed ?? "0");
+		const devPlanCreditsLimit = parseFloat(org.devPlanCreditsLimit ?? "0");
 		const devPlanCreditsRemaining =
 			org.devPlan !== "none" ? devPlanCreditsLimit - devPlanCreditsUsed : 0;
 		const totalCredits = regularCredits + devPlanCreditsRemaining;

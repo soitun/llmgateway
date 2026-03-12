@@ -697,8 +697,8 @@ export function LogDetailClient({
 										<span className="font-mono text-xs">{log.apiKeyId}</span>
 									}
 								/>
-								<Field label="Mode" value={log.mode || "?"} />
-								<Field label="Used Mode" value={log.usedMode || "?"} />
+								<Field label="Mode" value={log.mode ?? "?"} />
+								<Field label="Used Mode" value={log.usedMode ?? "?"} />
 								<Field
 									label="Date"
 									value={format(log.createdAt, "dd.MM.yyyy HH:mm:ss")}
@@ -815,10 +815,10 @@ export function LogDetailClient({
 													>
 														<div className="flex justify-between items-center mb-2">
 															<span className="text-sm font-medium">
-																{toolCall.function?.name || "Unknown"}
+																{toolCall.function?.name ?? "Unknown"}
 															</span>
 															<span className="text-xs text-muted-foreground font-mono">
-																{toolCall.id || "N/A"}
+																{toolCall.id ?? "N/A"}
 															</span>
 														</div>
 														{toolCall.function?.arguments && (

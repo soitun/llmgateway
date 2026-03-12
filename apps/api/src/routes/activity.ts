@@ -315,8 +315,8 @@ activity.openapi(getActivity, async (c) => {
 				modelBreakdownByDate.set(breakdown.date, []);
 			}
 			modelBreakdownByDate.get(breakdown.date)!.push({
-				id: breakdown.usedModel || "unknown",
-				provider: breakdown.usedProvider || "unknown",
+				id: breakdown.usedModel ?? "unknown",
+				provider: breakdown.usedProvider ?? "unknown",
 				requestCount: Number(breakdown.requestCount),
 				inputTokens: Number(breakdown.inputTokens),
 				outputTokens: Number(breakdown.outputTokens),
@@ -548,8 +548,8 @@ activity.openapi(getActivity, async (c) => {
 			modelBreakdownByDate.set(breakdown.date, []);
 		}
 		modelBreakdownByDate.get(breakdown.date)!.push({
-			id: breakdown.usedModel || "unknown",
-			provider: breakdown.usedProvider || "unknown",
+			id: breakdown.usedModel ?? "unknown",
+			provider: breakdown.usedProvider ?? "unknown",
 			requestCount: Number(breakdown.requestCount),
 			inputTokens: Number(breakdown.inputTokens),
 			outputTokens: Number(breakdown.outputTokens),

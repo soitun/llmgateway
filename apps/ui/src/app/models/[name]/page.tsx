@@ -212,7 +212,7 @@ export default async function ModelPage({ params }: PageProps) {
 			`Access ${modelDef.name ?? modelDef.id} through LLM Gateway's unified API.`,
 		brand: {
 			"@type": "Brand",
-			name: modelDef.family || "LLM Gateway",
+			name: modelDef.family ?? "LLM Gateway",
 		},
 		offers: {
 			"@type": "AggregateOffer",
@@ -554,7 +554,7 @@ export async function generateMetadata({
 		model.description ??
 		`Details, pricing, and capabilities for ${model.name ?? model.id} on LLM Gateway.`;
 
-	const primaryProvider = model.providers[0]?.providerId || "default";
+	const primaryProvider = model.providers[0]?.providerId ?? "default";
 	const ogImageUrl = `/models/${encodeURIComponent(decodedName)}/${encodeURIComponent(primaryProvider)}/opengraph-image`;
 
 	return {
