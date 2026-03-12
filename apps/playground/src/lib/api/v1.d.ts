@@ -2680,6 +2680,8 @@ export interface paths {
                     sortOrder?: "asc" | "desc";
                     limit?: number | null;
                     offset?: number | null;
+                    from?: string;
+                    to?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2711,6 +2713,8 @@ export interface paths {
                                 updatedAt: string;
                             }[];
                             total: number;
+                            totalTokens: number;
+                            totalCost: number;
                         };
                     };
                 };

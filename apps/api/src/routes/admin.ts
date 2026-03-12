@@ -2385,21 +2385,40 @@ admin.openapi(getProviderStats, async (c) => {
 		const [statsRows, providerRows, modelCountRows] = await Promise.all([
 			db
 				.select({
-					usedProvider: projectHourlyModelStats.usedProvider,
-					logsCount: sql<number>`SUM(${projectHourlyModelStats.requestCount})`,
-					errorsCount: sql<number>`SUM(${projectHourlyModelStats.errorCount})`,
-					cachedCount: sql<number>`SUM(${projectHourlyModelStats.cacheCount})`,
-					totalTokens: sql<number>`SUM(CAST(${projectHourlyModelStats.totalTokens} AS NUMERIC))`,
-					totalCost: sql<number>`SUM(${projectHourlyModelStats.cost})`,
+					providerId: modelProviderMappingHistory.providerId,
+					logsCount:
+						sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
+							"logs_count",
+						),
+					errorsCount:
+						sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
+							"errors_count",
+						),
+					cachedCount:
+						sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
+							"cached_count",
+						),
+					totalTokens:
+						sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
+							"total_tokens",
+						),
+					totalCost:
+						sql<number>`SUM(${modelProviderMappingHistory.totalCost})`.as(
+							"total_cost",
+						),
+					totalTimeToFirstToken:
+						sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
+							"total_ttft",
+						),
 				})
-				.from(projectHourlyModelStats)
+				.from(modelProviderMappingHistory)
 				.where(
 					and(
-						gte(projectHourlyModelStats.hourTimestamp, startDate),
-						lt(projectHourlyModelStats.hourTimestamp, endDateExclusive),
+						gte(modelProviderMappingHistory.minuteTimestamp, startDate),
+						lt(modelProviderMappingHistory.minuteTimestamp, endDateExclusive),
 					),
 				)
-				.groupBy(projectHourlyModelStats.usedProvider),
+				.groupBy(modelProviderMappingHistory.providerId),
 			db
 				.select({
 					id: tables.provider.id,
@@ -2421,13 +2440,18 @@ admin.openapi(getProviderStats, async (c) => {
 
 		const statsMap = new Map(
 			statsRows.map((r) => [
-				r.usedProvider,
+				r.providerId,
 				{
 					logsCount: Number(r.logsCount ?? 0),
 					errorsCount: Number(r.errorsCount ?? 0),
 					cachedCount: Number(r.cachedCount ?? 0),
 					totalTokens: Number(r.totalTokens ?? 0),
 					totalCost: Number(r.totalCost ?? 0),
+					avgTimeToFirstToken:
+						Number(r.logsCount ?? 0) - Number(r.cachedCount ?? 0) > 0
+							? Number(r.totalTimeToFirstToken ?? 0) /
+								(Number(r.logsCount ?? 0) - Number(r.cachedCount ?? 0))
+							: null,
 				},
 			]),
 		);
@@ -2443,7 +2467,7 @@ admin.openapi(getProviderStats, async (c) => {
 			logsCount: statsMap.get(p.id)?.logsCount ?? 0,
 			errorsCount: statsMap.get(p.id)?.errorsCount ?? 0,
 			cachedCount: statsMap.get(p.id)?.cachedCount ?? 0,
-			avgTimeToFirstToken: p.avgTimeToFirstToken,
+			avgTimeToFirstToken: statsMap.get(p.id)?.avgTimeToFirstToken ?? null,
 			modelCount: modelCountMap.get(p.id) ?? 0,
 			totalTokens: statsMap.get(p.id)?.totalTokens ?? 0,
 			totalCost: statsMap.get(p.id)?.totalCost ?? 0,
@@ -2639,11 +2663,25 @@ admin.openapi(getModelStats, async (c) => {
 			db
 				.select({
 					modelId: modelHistory.modelId,
-					logsCount: sql<number>`SUM(${modelHistory.logsCount})`,
-					errorsCount: sql<number>`SUM(${modelHistory.errorsCount})`,
-					cachedCount: sql<number>`SUM(${modelHistory.cachedCount})`,
-					totalTokens: sql<number>`SUM(CAST(${modelHistory.totalTokens} AS NUMERIC))`,
-					totalCost: sql<number>`SUM(${modelHistory.totalCost})`,
+					logsCount: sql<number>`SUM(${modelHistory.logsCount})`.as(
+						"logs_count",
+					),
+					errorsCount: sql<number>`SUM(${modelHistory.errorsCount})`.as(
+						"errors_count",
+					),
+					cachedCount: sql<number>`SUM(${modelHistory.cachedCount})`.as(
+						"cached_count",
+					),
+					totalTokens: sql<number>`SUM(${modelHistory.totalTokens})`.as(
+						"total_tokens",
+					),
+					totalCost: sql<number>`SUM(${modelHistory.totalCost})`.as(
+						"total_cost",
+					),
+					totalTimeToFirstToken:
+						sql<number>`SUM(${modelHistory.totalTimeToFirstToken})`.as(
+							"total_ttft",
+						),
 				})
 				.from(modelHistory)
 				.where(
@@ -2684,6 +2722,11 @@ admin.openapi(getModelStats, async (c) => {
 					cachedCount: Number(r.cachedCount ?? 0),
 					totalTokens: Number(r.totalTokens ?? 0),
 					totalCost: Number(r.totalCost ?? 0),
+					avgTimeToFirstToken:
+						Number(r.logsCount ?? 0) - Number(r.cachedCount ?? 0) > 0
+							? Number(r.totalTimeToFirstToken ?? 0) /
+								(Number(r.logsCount ?? 0) - Number(r.cachedCount ?? 0))
+							: null,
 				},
 			]),
 		);
@@ -2701,7 +2744,7 @@ admin.openapi(getModelStats, async (c) => {
 			logsCount: statsMap.get(m.id)?.logsCount ?? 0,
 			errorsCount: statsMap.get(m.id)?.errorsCount ?? 0,
 			cachedCount: statsMap.get(m.id)?.cachedCount ?? 0,
-			avgTimeToFirstToken: m.avgTimeToFirstToken,
+			avgTimeToFirstToken: statsMap.get(m.id)?.avgTimeToFirstToken ?? null,
 			providerCount: providerCountMap.get(m.id) ?? 0,
 			totalTokens: statsMap.get(m.id)?.totalTokens ?? 0,
 			totalCost: statsMap.get(m.id)?.totalCost ?? 0,
@@ -3161,12 +3204,6 @@ function getHistoryStartDate(window: string): Date {
 	return new Date(Date.now() - ms);
 }
 
-function getHourFloor(date: Date): string {
-	const d = new Date(date);
-	d.setMinutes(0, 0, 0);
-	return d.toISOString();
-}
-
 function mapHistoryRows(
 	rows: {
 		minuteTimestamp: Date;
@@ -3176,15 +3213,9 @@ function mapHistoryRows(
 		totalDuration: number;
 		totalTimeToFirstToken: number;
 		totalTokens: number;
+		totalCost: number;
 	}[],
-	costByHour: Map<string, number> = new Map(),
 ) {
-	const requestsByHour = new Map<string, number>();
-	for (const r of rows) {
-		const hk = getHourFloor(r.minuteTimestamp);
-		requestsByHour.set(hk, (requestsByHour.get(hk) ?? 0) + Number(r.logsCount));
-	}
-
 	return rows.map((r) => {
 		const logsCount = Number(r.logsCount);
 		const errorsCount = Number(r.errorsCount);
@@ -3192,12 +3223,8 @@ function mapHistoryRows(
 		const totalDuration = Number(r.totalDuration);
 		const totalTimeToFirstToken = Number(r.totalTimeToFirstToken);
 		const totalTokens = Number(r.totalTokens);
+		const totalCost = Number(r.totalCost);
 		const nonCached = logsCount - cachedCount;
-
-		const hk = getHourFloor(r.minuteTimestamp);
-		const hourCost = costByHour.get(hk) ?? 0;
-		const hourReqs = requestsByHour.get(hk) ?? 0;
-		const totalCost = hourReqs > 0 ? (logsCount / hourReqs) * hourCost : 0;
 
 		return {
 			timestamp: r.minuteTimestamp.toISOString(),
@@ -3238,71 +3265,47 @@ admin.openapi(getProviderHistory, async (c) => {
 	const query = c.req.valid("query");
 	const window = query.window ?? "4h";
 	const startDate = getHistoryStartDate(window);
-	const hourStartDate = new Date(startDate);
-	hourStartDate.setMinutes(0, 0, 0);
-
-	const [rows, costRows] = await Promise.all([
-		db
-			.select({
-				minuteTimestamp: modelProviderMappingHistory.minuteTimestamp,
-				logsCount:
-					sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
-						"logs_count",
-					),
-				errorsCount:
-					sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
-						"errors_count",
-					),
-				cachedCount:
-					sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
-						"cached_count",
-					),
-				totalDuration:
-					sql<number>`SUM(${modelProviderMappingHistory.totalDuration})`.as(
-						"total_duration",
-					),
-				totalTimeToFirstToken:
-					sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
-						"total_ttft",
-					),
-				totalTokens:
-					sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
-						"total_tokens",
-					),
-			})
-			.from(modelProviderMappingHistory)
-			.where(
-				and(
-					eq(modelProviderMappingHistory.providerId, providerId),
-					gte(modelProviderMappingHistory.minuteTimestamp, startDate),
+	const rows = await db
+		.select({
+			minuteTimestamp: modelProviderMappingHistory.minuteTimestamp,
+			logsCount: sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
+				"logs_count",
+			),
+			errorsCount:
+				sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
+					"errors_count",
 				),
-			)
-			.groupBy(modelProviderMappingHistory.minuteTimestamp)
-			.orderBy(asc(modelProviderMappingHistory.minuteTimestamp)),
-		db
-			.select({
-				hourTimestamp: projectHourlyModelStats.hourTimestamp,
-				cost: sql<number>`SUM(${projectHourlyModelStats.cost})`,
-			})
-			.from(projectHourlyModelStats)
-			.where(
-				and(
-					eq(projectHourlyModelStats.usedProvider, providerId),
-					gte(projectHourlyModelStats.hourTimestamp, hourStartDate),
+			cachedCount:
+				sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
+					"cached_count",
 				),
-			)
-			.groupBy(projectHourlyModelStats.hourTimestamp),
-	]);
+			totalDuration:
+				sql<number>`SUM(${modelProviderMappingHistory.totalDuration})`.as(
+					"total_duration",
+				),
+			totalTimeToFirstToken:
+				sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
+					"total_ttft",
+				),
+			totalTokens:
+				sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
+					"total_tokens",
+				),
+			totalCost: sql<number>`SUM(${modelProviderMappingHistory.totalCost})`.as(
+				"total_cost",
+			),
+		})
+		.from(modelProviderMappingHistory)
+		.where(
+			and(
+				eq(modelProviderMappingHistory.providerId, providerId),
+				gte(modelProviderMappingHistory.minuteTimestamp, startDate),
+			),
+		)
+		.groupBy(modelProviderMappingHistory.minuteTimestamp)
+		.orderBy(asc(modelProviderMappingHistory.minuteTimestamp));
 
-	const costByHour = new Map<string, number>(
-		costRows.map((r) => {
-			const d = new Date(r.hourTimestamp);
-			d.setMinutes(0, 0, 0);
-			return [d.toISOString(), Number(r.cost)];
-		}),
-	);
-
-	return c.json({ data: mapHistoryRows(rows, costByHour) });
+	return c.json({ data: mapHistoryRows(rows) });
 });
 
 // Model history
@@ -3330,64 +3333,39 @@ admin.openapi(getModelHistory, async (c) => {
 	const query = c.req.valid("query");
 	const window = query.window ?? "4h";
 	const startDate = getHistoryStartDate(window);
-	const hourStartDate = new Date(startDate);
-	hourStartDate.setMinutes(0, 0, 0);
+	const rows = await db
+		.select({
+			minuteTimestamp: modelHistory.minuteTimestamp,
+			logsCount: sql<number>`SUM(${modelHistory.logsCount})`.as("logs_count"),
+			errorsCount: sql<number>`SUM(${modelHistory.errorsCount})`.as(
+				"errors_count",
+			),
+			cachedCount: sql<number>`SUM(${modelHistory.cachedCount})`.as(
+				"cached_count",
+			),
+			totalDuration: sql<number>`SUM(${modelHistory.totalDuration})`.as(
+				"total_duration",
+			),
+			totalTimeToFirstToken:
+				sql<number>`SUM(${modelHistory.totalTimeToFirstToken})`.as(
+					"total_ttft",
+				),
+			totalTokens: sql<number>`SUM(${modelHistory.totalTokens})`.as(
+				"total_tokens",
+			),
+			totalCost: sql<number>`SUM(${modelHistory.totalCost})`.as("total_cost"),
+		})
+		.from(modelHistory)
+		.where(
+			and(
+				eq(modelHistory.modelId, modelId),
+				gte(modelHistory.minuteTimestamp, startDate),
+			),
+		)
+		.groupBy(modelHistory.minuteTimestamp)
+		.orderBy(asc(modelHistory.minuteTimestamp));
 
-	const [rows, costRows] = await Promise.all([
-		db
-			.select({
-				minuteTimestamp: modelHistory.minuteTimestamp,
-				logsCount: sql<number>`SUM(${modelHistory.logsCount})`.as("logs_count"),
-				errorsCount: sql<number>`SUM(${modelHistory.errorsCount})`.as(
-					"errors_count",
-				),
-				cachedCount: sql<number>`SUM(${modelHistory.cachedCount})`.as(
-					"cached_count",
-				),
-				totalDuration: sql<number>`SUM(${modelHistory.totalDuration})`.as(
-					"total_duration",
-				),
-				totalTimeToFirstToken:
-					sql<number>`SUM(${modelHistory.totalTimeToFirstToken})`.as(
-						"total_ttft",
-					),
-				totalTokens: sql<number>`SUM(${modelHistory.totalTokens})`.as(
-					"total_tokens",
-				),
-			})
-			.from(modelHistory)
-			.where(
-				and(
-					eq(modelHistory.modelId, modelId),
-					gte(modelHistory.minuteTimestamp, startDate),
-				),
-			)
-			.groupBy(modelHistory.minuteTimestamp)
-			.orderBy(asc(modelHistory.minuteTimestamp)),
-		db
-			.select({
-				hourTimestamp: projectHourlyModelStats.hourTimestamp,
-				cost: sql<number>`SUM(${projectHourlyModelStats.cost})`,
-			})
-			.from(projectHourlyModelStats)
-			.where(
-				and(
-					eq(projectHourlyModelStats.usedModel, modelId),
-					gte(projectHourlyModelStats.hourTimestamp, hourStartDate),
-				),
-			)
-			.groupBy(projectHourlyModelStats.hourTimestamp),
-	]);
-
-	const costByHour = new Map<string, number>(
-		costRows.map((r) => {
-			const d = new Date(r.hourTimestamp);
-			d.setMinutes(0, 0, 0);
-			return [d.toISOString(), Number(r.cost)];
-		}),
-	);
-
-	return c.json({ data: mapHistoryRows(rows, costByHour) });
+	return c.json({ data: mapHistoryRows(rows) });
 });
 
 // Mapping history (provider + model)
@@ -3418,107 +3396,48 @@ admin.openapi(getMappingHistory, async (c) => {
 	const query = c.req.valid("query");
 	const window = query.window ?? "4h";
 	const startDate = getHistoryStartDate(window);
-	const hourStartDate = new Date(startDate);
-	hourStartDate.setMinutes(0, 0, 0);
-
-	const [minuteRows, hourlyRows] = await Promise.all([
-		db
-			.select({
-				minuteTimestamp: modelProviderMappingHistory.minuteTimestamp,
-				logsCount:
-					sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
-						"logs_count",
-					),
-				errorsCount:
-					sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
-						"errors_count",
-					),
-				cachedCount:
-					sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
-						"cached_count",
-					),
-				totalDuration:
-					sql<number>`SUM(${modelProviderMappingHistory.totalDuration})`.as(
-						"total_duration",
-					),
-				totalTimeToFirstToken:
-					sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
-						"total_ttft",
-					),
-				totalTokens:
-					sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
-						"total_tokens",
-					),
-			})
-			.from(modelProviderMappingHistory)
-			.where(
-				and(
-					eq(modelProviderMappingHistory.providerId, providerId),
-					eq(modelProviderMappingHistory.modelId, modelId),
-					gte(modelProviderMappingHistory.minuteTimestamp, startDate),
-				),
-			)
-			.groupBy(modelProviderMappingHistory.minuteTimestamp)
-			.orderBy(asc(modelProviderMappingHistory.minuteTimestamp)),
-		db
-			.select({
-				hourTimestamp: projectHourlyModelStats.hourTimestamp,
-				logsCount: sql<number>`SUM(${projectHourlyModelStats.requestCount})`.as(
-					"logs_count",
-				),
-				errorsCount: sql<number>`SUM(${projectHourlyModelStats.errorCount})`.as(
+	const rows = await db
+		.select({
+			minuteTimestamp: modelProviderMappingHistory.minuteTimestamp,
+			logsCount: sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
+				"logs_count",
+			),
+			errorsCount:
+				sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
 					"errors_count",
 				),
-				cachedCount: sql<number>`SUM(${projectHourlyModelStats.cacheCount})`.as(
+			cachedCount:
+				sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
 					"cached_count",
 				),
-				totalTokens:
-					sql<number>`SUM(CAST(${projectHourlyModelStats.totalTokens} AS NUMERIC))`.as(
-						"total_tokens",
-					),
-				cost: sql<number>`SUM(${projectHourlyModelStats.cost})`.as("cost"),
-			})
-			.from(projectHourlyModelStats)
-			.where(
-				and(
-					eq(projectHourlyModelStats.usedProvider, providerId),
-					eq(projectHourlyModelStats.usedModel, modelId),
-					gte(projectHourlyModelStats.hourTimestamp, hourStartDate),
+			totalDuration:
+				sql<number>`SUM(${modelProviderMappingHistory.totalDuration})`.as(
+					"total_duration",
 				),
-			)
-			.groupBy(projectHourlyModelStats.hourTimestamp)
-			.orderBy(asc(projectHourlyModelStats.hourTimestamp)),
-	]);
+			totalTimeToFirstToken:
+				sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
+					"total_ttft",
+				),
+			totalTokens:
+				sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
+					"total_tokens",
+				),
+			totalCost: sql<number>`SUM(${modelProviderMappingHistory.totalCost})`.as(
+				"total_cost",
+			),
+		})
+		.from(modelProviderMappingHistory)
+		.where(
+			and(
+				eq(modelProviderMappingHistory.providerId, providerId),
+				eq(modelProviderMappingHistory.modelId, modelId),
+				gte(modelProviderMappingHistory.minuteTimestamp, startDate),
+			),
+		)
+		.groupBy(modelProviderMappingHistory.minuteTimestamp)
+		.orderBy(asc(modelProviderMappingHistory.minuteTimestamp));
 
-	const hasMinuteData = minuteRows.some((r) => Number(r.logsCount) > 0);
-	if (hasMinuteData) {
-		const costByHour = new Map<string, number>(
-			hourlyRows.map((r) => {
-				const d = new Date(r.hourTimestamp);
-				d.setMinutes(0, 0, 0);
-				return [d.toISOString(), Number(r.cost)];
-			}),
-		);
-		return c.json({ data: mapHistoryRows(minuteRows, costByHour) });
-	}
-
-	const data = hourlyRows.map((r) => {
-		const logsCount = Number(r.logsCount);
-		const errorsCount = Number(r.errorsCount);
-		const cachedCount = Number(r.cachedCount);
-		return {
-			timestamp: new Date(r.hourTimestamp).toISOString(),
-			logsCount,
-			errorsCount,
-			cachedCount,
-			avgTtft: null,
-			avgDuration: null,
-			totalTokens: Number(r.totalTokens),
-			totalCost: Number(r.cost),
-		};
-	});
-
-	return c.json({ data });
+	return c.json({ data: mapHistoryRows(rows) });
 });
 
 // --- Cost by model endpoints ---
@@ -3736,6 +3655,8 @@ const modelProviderMappingEntrySchema = z.object({
 const modelProviderMappingsListSchema = z.object({
 	mappings: z.array(modelProviderMappingEntrySchema),
 	total: z.number(),
+	totalTokens: z.number(),
+	totalCost: z.number(),
 });
 
 const getModelProviderMappings = createRoute({
@@ -3757,6 +3678,8 @@ const getModelProviderMappings = createRoute({
 			sortOrder: z.enum(["asc", "desc"]).optional(),
 			limit: z.coerce.number().optional(),
 			offset: z.coerce.number().optional(),
+			from: z.string().optional(),
+			to: z.string().optional(),
 		}),
 	},
 	responses: {
@@ -3778,6 +3701,7 @@ admin.openapi(getModelProviderMappings, async (c) => {
 	const limit = query.limit ?? 100;
 	const offset = query.offset ?? 0;
 	const search = query.search ?? "";
+	const { from, to } = query;
 
 	const whereClause = search
 		? or(
@@ -3786,7 +3710,21 @@ admin.openapi(getModelProviderMappings, async (c) => {
 			)
 		: undefined;
 
-	// Fetch all mapping metadata rows
+	let startDate: Date | undefined;
+	let endDateExclusive: Date | undefined;
+	if (from && to) {
+		if (from.includes("T") || from.includes("Z")) {
+			startDate = new Date(from);
+			endDateExclusive = new Date(to);
+		} else {
+			startDate = new Date(from + "T00:00:00");
+			startDate.setUTCHours(0, 0, 0, 0);
+			endDateExclusive = new Date(to + "T00:00:00");
+			endDateExclusive.setUTCHours(0, 0, 0, 0);
+			endDateExclusive.setDate(endDateExclusive.getDate() + 1);
+		}
+	}
+
 	const [mappingRows, providerRows, statsRows] = await Promise.all([
 		db
 			.select({
@@ -3804,19 +3742,47 @@ admin.openapi(getModelProviderMappings, async (c) => {
 			.from(tables.modelProviderMapping)
 			.where(whereClause),
 		db.query.provider.findMany(),
-		// Aggregate real request counts from projectHourlyModelStats (same source models list uses)
 		db
 			.select({
-				usedModel: projectHourlyModelStats.usedModel,
-				usedProvider: projectHourlyModelStats.usedProvider,
-				logsCount: sql<number>`SUM(${projectHourlyModelStats.requestCount})`,
-				errorsCount: sql<number>`SUM(${projectHourlyModelStats.errorCount})`,
-				cachedCount: sql<number>`SUM(${projectHourlyModelStats.cacheCount})`,
+				modelId: modelProviderMappingHistory.modelId,
+				providerId: modelProviderMappingHistory.providerId,
+				logsCount:
+					sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
+						"logs_count",
+					),
+				errorsCount:
+					sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
+						"errors_count",
+					),
+				cachedCount:
+					sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
+						"cached_count",
+					),
+				totalTokens:
+					sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
+						"total_tokens",
+					),
+				totalCost:
+					sql<number>`SUM(${modelProviderMappingHistory.totalCost})`.as(
+						"total_cost",
+					),
+				totalTimeToFirstToken:
+					sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
+						"total_ttft",
+					),
 			})
-			.from(projectHourlyModelStats)
+			.from(modelProviderMappingHistory)
+			.where(
+				startDate && endDateExclusive
+					? and(
+							gte(modelProviderMappingHistory.minuteTimestamp, startDate),
+							lt(modelProviderMappingHistory.minuteTimestamp, endDateExclusive),
+						)
+					: undefined,
+			)
 			.groupBy(
-				projectHourlyModelStats.usedModel,
-				projectHourlyModelStats.usedProvider,
+				modelProviderMappingHistory.modelId,
+				modelProviderMappingHistory.providerId,
 			),
 	]);
 
@@ -3824,11 +3790,18 @@ admin.openapi(getModelProviderMappings, async (c) => {
 	const statsKey = (model: string, provider: string) => `${model}::${provider}`;
 	const statsMap = new Map(
 		statsRows.map((r) => [
-			statsKey(r.usedModel, r.usedProvider),
+			statsKey(r.modelId, r.providerId),
 			{
 				logsCount: Number(r.logsCount ?? 0),
 				errorsCount: Number(r.errorsCount ?? 0),
 				cachedCount: Number(r.cachedCount ?? 0),
+				totalTokens: Number(r.totalTokens ?? 0),
+				totalCost: Number(r.totalCost ?? 0),
+				avgTimeToFirstToken:
+					Number(r.logsCount ?? 0) - Number(r.cachedCount ?? 0) > 0
+						? Number(r.totalTimeToFirstToken ?? 0) /
+							(Number(r.logsCount ?? 0) - Number(r.cachedCount ?? 0))
+						: null,
 			},
 		]),
 	);
@@ -3845,7 +3818,7 @@ admin.openapi(getModelProviderMappings, async (c) => {
 			logsCount: stats?.logsCount ?? 0,
 			errorsCount: stats?.errorsCount ?? 0,
 			cachedCount: stats?.cachedCount ?? 0,
-			avgTimeToFirstToken: r.avgTimeToFirstToken,
+			avgTimeToFirstToken: stats?.avgTimeToFirstToken ?? null,
 			inputPrice: r.inputPrice,
 			outputPrice: r.outputPrice,
 			contextSize: r.contextSize,
@@ -3866,9 +3839,26 @@ admin.openapi(getModelProviderMappings, async (c) => {
 		return 0;
 	});
 
+	const totalTokens = merged.reduce(
+		(sum, mapping) =>
+			sum +
+			(statsMap.get(statsKey(mapping.modelId, mapping.providerId))
+				?.totalTokens ?? 0),
+		0,
+	);
+	const totalCost = merged.reduce(
+		(sum, mapping) =>
+			sum +
+			(statsMap.get(statsKey(mapping.modelId, mapping.providerId))?.totalCost ??
+				0),
+		0,
+	);
+
 	return c.json({
 		mappings: merged.slice(offset, offset + limit),
 		total: merged.length,
+		totalTokens,
+		totalCost,
 	});
 });
 
