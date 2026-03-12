@@ -224,14 +224,23 @@ describe("getErrorType", () => {
 		expect(getErrorType(429)).toBe("rate_limited");
 	});
 
+	it("returns gateway_error for 401/403", () => {
+		expect(getErrorType(401)).toBe("gateway_error");
+		expect(getErrorType(403)).toBe("gateway_error");
+	});
+
 	it("returns upstream_error for 5xx status codes", () => {
 		expect(getErrorType(500)).toBe("upstream_error");
 		expect(getErrorType(502)).toBe("upstream_error");
 		expect(getErrorType(503)).toBe("upstream_error");
 	});
 
-	it("returns upstream_error for other status codes", () => {
-		expect(getErrorType(400)).toBe("upstream_error");
+	it("returns upstream_error for 404", () => {
 		expect(getErrorType(404)).toBe("upstream_error");
+	});
+
+	it("returns client_error for other 4xx status codes", () => {
+		expect(getErrorType(400)).toBe("client_error");
+		expect(getErrorType(422)).toBe("client_error");
 	});
 });
