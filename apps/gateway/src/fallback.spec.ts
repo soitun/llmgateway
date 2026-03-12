@@ -827,6 +827,53 @@ describe("fallback and error status code handling", () => {
 			expect(failedLog!.retriedByLogId).toBe(successLog!.id);
 		});
 
+		test("non-streaming: retries on 404 and succeeds on fallback provider", async () => {
+			await setupMultiProviderKeys();
+
+			const res = await app.request("/v1/chat/completions", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer real-token",
+				},
+				body: JSON.stringify({
+					model: "llama-3.1-8b-instruct",
+					messages: [
+						{ role: "user", content: "TRIGGER_STATUS_404_ONCE hello" },
+					],
+				}),
+			});
+
+			expect(res.status).toBe(200);
+			const json = await res.json();
+			expect(json).toHaveProperty(["choices", 0, "message", "content"]);
+			expect(json.metadata.routing).toBeDefined();
+			expect(json.metadata.routing.length).toBeGreaterThanOrEqual(2);
+			expect(json.metadata.routing[0]).toHaveProperty("status_code", 404);
+			expect(json.metadata.routing[0]).toHaveProperty("succeeded", false);
+			expect(
+				json.metadata.routing[json.metadata.routing.length - 1],
+			).toHaveProperty("succeeded", true);
+
+			const logs = await waitForLogs(2);
+			expect(logs.length).toBeGreaterThanOrEqual(2);
+
+			const successLog = logs.find(
+				(l: Log) => l.finishReason === "stop" || !l.hasError,
+			);
+			expect(successLog).toBeDefined();
+			expect(successLog!.routingMetadata?.routing?.[0]).toHaveProperty(
+				"status_code",
+				404,
+			);
+
+			const failedLog = logs.find((l: Log) => l.hasError);
+			expect(failedLog).toBeDefined();
+			expect(failedLog!.finishReason).toBe("upstream_error");
+			expect(failedLog!.retried).toBe(true);
+			expect(failedLog!.retriedByLogId).toBe(successLog!.id);
+		});
+
 		test("non-streaming: does not retry when X-No-Fallback is set", async () => {
 			await setupMultiProviderKeys();
 

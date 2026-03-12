@@ -127,15 +127,17 @@ function extractStatusCodeTrigger(
 	};
 }
 
-// Counter for TRIGGER_FAIL_ONCE - tracks how many times a request with this
-// trigger has been received. First request fails with 500, subsequent succeed.
+// Counter for one-shot failure triggers. The first matching request fails and
+// subsequent ones succeed so fallback tests can verify retry behavior.
 // NOTE: This is module-level mutable state shared across all tests using this server.
-// Each test that relies on TRIGGER_FAIL_ONCE must call resetFailOnceCounter()
+// Each test that relies on these triggers must call resetFailOnceCounter()
 // in its beforeEach to avoid cross-test interference.
 let failOnceCounter = 0;
+let fail404OnceCounter = 0;
 
 export function resetFailOnceCounter() {
 	failOnceCounter = 0;
+	fail404OnceCounter = 0;
 }
 
 // Helper to delay response
@@ -234,6 +236,21 @@ mockOpenAIServer.post("/v1/chat/completions", async (c) => {
 			});
 		}
 		// Subsequent requests succeed - fall through to normal response
+	}
+
+	if (userMessage.includes("TRIGGER_STATUS_404_ONCE")) {
+		fail404OnceCounter++;
+		if (fail404OnceCounter === 1) {
+			c.status(404);
+			return c.json({
+				error: {
+					message: "The model 'nonexistent-model' does not exist.",
+					type: "invalid_request_error",
+					param: "model",
+					code: "model_not_found",
+				},
+			});
+		}
 	}
 
 	// Check if this request should trigger a timeout (delay response)

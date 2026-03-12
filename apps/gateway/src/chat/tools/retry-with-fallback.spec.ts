@@ -24,11 +24,14 @@ describe("isRetryableError", () => {
 		expect(isRetryableError(0)).toBe(true);
 	});
 
+	it("retries on 404 model not found", () => {
+		expect(isRetryableError(404)).toBe(true);
+	});
+
 	it("does not retry on client errors", () => {
 		expect(isRetryableError(400)).toBe(false);
 		expect(isRetryableError(401)).toBe(false);
 		expect(isRetryableError(403)).toBe(false);
-		expect(isRetryableError(404)).toBe(false);
 		expect(isRetryableError(422)).toBe(false);
 	});
 
@@ -66,7 +69,7 @@ describe("shouldRetryRequest", () => {
 
 	it("does not retry on non-retryable status codes", () => {
 		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 400 })).toBe(false);
-		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 404 })).toBe(false);
+		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 422 })).toBe(false);
 	});
 
 	it("does not retry when max retries exceeded", () => {
@@ -105,6 +108,10 @@ describe("shouldRetryRequest", () => {
 
 	it("retries on network errors (status 0)", () => {
 		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 0 })).toBe(true);
+	});
+
+	it("retries on 404 when the provider was auto-selected", () => {
+		expect(shouldRetryRequest({ ...defaultOpts, statusCode: 404 })).toBe(true);
 	});
 });
 
