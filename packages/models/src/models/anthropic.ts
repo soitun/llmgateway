@@ -351,7 +351,6 @@ export const anthropicModels = [
 				webSearchPrice: 0.01, // $10 per 1000 searches
 			},
 			{
-				test: "skip",
 				providerId: "aws-bedrock",
 				modelName: "anthropic.claude-sonnet-4-6",
 				inputPrice: 3.0 / 1e6,
@@ -361,7 +360,7 @@ export const anthropicModels = [
 				requestPrice: 0,
 				discount: 0.3,
 				contextSize: 200000,
-				maxOutput: 8192,
+				maxOutput: 64000,
 				reasoning: true,
 				reasoningMaxTokens: true,
 				reasoningOutput: "omit",
