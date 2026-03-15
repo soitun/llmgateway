@@ -657,6 +657,30 @@ export async function prepareRequestBody(
 		requestBody.tool_choice = tool_choice;
 	}
 
+	// For Alibaba reasoning models, disable thinking mode when tool_choice forces tool use.
+	// The Alibaba API rejects tool_choice "required" or specific function in thinking mode.
+	if (
+		usedProvider === "alibaba" &&
+		tools &&
+		tools.filter(isFunctionTool).length > 0 &&
+		(tool_choice === "required" ||
+			(typeof tool_choice === "object" && tool_choice.type === "function"))
+	) {
+		requestBody.enable_thinking = false;
+	}
+
+	// For Moonshot models, disable thinking mode when tool_choice forces tool use.
+	// Moonshot kimi-k2.5 has thinking enabled by default; use thinking: { enabled: false } to disable.
+	if (
+		usedProvider === "moonshot" &&
+		tools &&
+		tools.filter(isFunctionTool).length > 0 &&
+		(tool_choice === "required" ||
+			(typeof tool_choice === "object" && tool_choice.type === "function"))
+	) {
+		requestBody.thinking = { enabled: false };
+	}
+
 	// Override temperature to 1 for GPT-5 models (they only support temperature = 1)
 	if (usedModel.startsWith("gpt-5")) {
 		temperature = 1;
@@ -1068,15 +1092,12 @@ export async function prepareRequestBody(
 						type: "tool",
 						name: tool_choice.function.name,
 					};
+				} else if (tool_choice === "required") {
+					requestBody.tool_choice = { type: "any" };
 				} else if (tool_choice === "auto") {
 					// "auto" is the default behavior for Anthropic, omit it
-					// Anthropic doesn't need explicit "auto" tool_choice
 				} else if (tool_choice === "none") {
-					// "none" should work as-is
-					requestBody.tool_choice = tool_choice;
-				} else {
-					// Other string values (though not standard)
-					requestBody.tool_choice = tool_choice;
+					requestBody.tool_choice = { type: "none" };
 				}
 			}
 
@@ -1437,7 +1458,29 @@ export async function prepareRequestBody(
 			delete requestBody.model; // Not used in body
 			delete requestBody.stream; // Stream is handled via URL parameter
 			delete requestBody.messages; // Not used in body for Google providers
-			delete requestBody.tool_choice; // Google doesn't support tool_choice parameter
+			// Map OpenAI tool_choice to Google's toolConfig format
+			if (tool_choice && tools && tools.filter(isFunctionTool).length > 0) {
+				if (tool_choice === "required") {
+					requestBody.toolConfig = {
+						functionCallingConfig: { mode: "ANY" },
+					};
+				} else if (tool_choice === "none") {
+					requestBody.toolConfig = {
+						functionCallingConfig: { mode: "NONE" },
+					};
+				} else if (
+					typeof tool_choice === "object" &&
+					tool_choice.type === "function"
+				) {
+					requestBody.toolConfig = {
+						functionCallingConfig: {
+							mode: "ANY",
+							allowedFunctionNames: [tool_choice.function.name],
+						},
+					};
+				}
+			}
+			delete requestBody.tool_choice;
 
 			requestBody.contents = await transformGoogleMessages(
 				processedMessages,

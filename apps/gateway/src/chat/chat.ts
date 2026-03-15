@@ -3253,7 +3253,10 @@ chat.openapi(completions, async (c) => {
 					response_format?.type === "json_object" ||
 					response_format?.type === "json_schema";
 				const shouldBufferForHealing =
-					streamingResponseHealingEnabled && streamingIsJsonResponseFormat;
+					streamingIsJsonResponseFormat &&
+					(streamingResponseHealingEnabled === true ||
+						usedProvider === "novita" ||
+						usedProvider === "minimax");
 
 				// Buffer for storing chunks when healing is enabled
 				// We need to buffer content, track last chunk info, and replay healed content at the end
@@ -3964,7 +3967,10 @@ chat.openapi(completions, async (c) => {
 								}
 
 								// Extract usage data from transformedData to update tracking variables
-								if (transformedData.usage && usedProvider === "openai") {
+								if (
+									transformedData.usage &&
+									(usedProvider === "openai" || usedProvider === "azure")
+								) {
 									const usage = transformedData.usage;
 									if (
 										usage.prompt_tokens !== undefined &&
@@ -4099,7 +4105,12 @@ chat.openapi(completions, async (c) => {
 								}
 
 								// Extract and accumulate tool calls
-								const toolCallsChunk = extractToolCalls(data, usedProvider);
+								// For azure/openai, use transformedData to correctly handle Responses API format
+								// where tool calls appear in choices[0].delta.tool_calls after transformation
+								const toolCallsChunk =
+									usedProvider === "azure" || usedProvider === "openai"
+										? (transformedData?.choices?.[0]?.delta?.tool_calls ?? null)
+										: extractToolCalls(data, usedProvider);
 								if (toolCallsChunk && toolCallsChunk.length > 0) {
 									streamingToolCalls ??= [];
 									// Merge tool calls (accumulating function arguments)

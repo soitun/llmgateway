@@ -1202,6 +1202,7 @@ export const openaiModels = [
 				vision: true,
 				tools: true,
 				reasoning: true,
+				reasoningOutput: "omit",
 				supportsResponsesApi: true,
 				jsonOutputSchema: true,
 				supportedParameters: [
