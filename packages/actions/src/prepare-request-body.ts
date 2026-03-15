@@ -657,28 +657,27 @@ export async function prepareRequestBody(
 		requestBody.tool_choice = tool_choice;
 	}
 
-	// For Alibaba reasoning models, disable thinking mode when tool_choice forces tool use.
-	// The Alibaba API rejects tool_choice "required" or specific function in thinking mode.
-	if (
-		usedProvider === "alibaba" &&
+	const forcesToolUse =
 		tools &&
 		tools.filter(isFunctionTool).length > 0 &&
 		(tool_choice === "required" ||
-			(typeof tool_choice === "object" && tool_choice.type === "function"))
-	) {
+			(typeof tool_choice === "object" && tool_choice.type === "function"));
+
+	if (forcesToolUse && usedProvider === "alibaba") {
 		requestBody.enable_thinking = false;
 	}
 
-	// For Moonshot models, disable thinking mode when tool_choice forces tool use.
-	// Moonshot kimi-k2.5 has thinking enabled by default; use thinking: { enabled: false } to disable.
-	if (
-		usedProvider === "moonshot" &&
-		tools &&
-		tools.filter(isFunctionTool).length > 0 &&
-		(tool_choice === "required" ||
-			(typeof tool_choice === "object" && tool_choice.type === "function"))
-	) {
-		requestBody.thinking = { enabled: false };
+	if (forcesToolUse && usedProvider === "moonshot") {
+		const providerMapping = modelDef?.providers.find(
+			(p) => p.modelName === usedModel && p.providerId === usedProvider,
+		);
+		const isExplicitThinkingModel =
+			providerMapping &&
+			"reasoning" in providerMapping &&
+			providerMapping.reasoning === true;
+		if (!isExplicitThinkingModel) {
+			requestBody.thinking = { enabled: false };
+		}
 	}
 
 	// Override temperature to 1 for GPT-5 models (they only support temperature = 1)

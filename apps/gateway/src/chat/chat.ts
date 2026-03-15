@@ -3694,12 +3694,14 @@ chat.openapi(completions, async (c) => {
 									});
 								}
 
-								await writeSSEAndCache({
-									event: "done",
-									data: "[DONE]",
-									id: String(eventId++),
-								});
-								doneSent = true;
+								if (!shouldBufferForHealing) {
+									await writeSSEAndCache({
+										event: "done",
+										data: "[DONE]",
+										id: String(eventId++),
+									});
+									doneSent = true;
+								}
 
 								processedLength = eventEnd;
 							} else {
@@ -4104,13 +4106,11 @@ chat.openapi(completions, async (c) => {
 									}
 								}
 
-								// Extract and accumulate tool calls
-								// For azure/openai, use transformedData to correctly handle Responses API format
-								// where tool calls appear in choices[0].delta.tool_calls after transformation
-								const toolCallsChunk =
-									usedProvider === "azure" || usedProvider === "openai"
-										? (transformedData?.choices?.[0]?.delta?.tool_calls ?? null)
-										: extractToolCalls(data, usedProvider);
+								const toolCallsChunk = extractToolCalls(
+									data,
+									usedProvider,
+									transformedData,
+								);
 								if (toolCallsChunk && toolCallsChunk.length > 0) {
 									streamingToolCalls ??= [];
 									// Merge tool calls (accumulating function arguments)
@@ -5981,7 +5981,6 @@ chat.openapi(completions, async (c) => {
 		webSearchCount,
 	} = parsedResponse;
 
-	// Apply response healing if enabled and response_format is json_object or json_schema
 	const responseHealingEnabled = plugins?.some(
 		(p) => p.id === "response-healing",
 	);
@@ -5997,7 +5996,13 @@ chat.openapi(completions, async (c) => {
 		};
 	} = {};
 
-	if (responseHealingEnabled && isJsonResponseFormat && content) {
+	const shouldHealNonStreaming =
+		isJsonResponseFormat &&
+		(responseHealingEnabled === true ||
+			usedProvider === "novita" ||
+			usedProvider === "minimax");
+
+	if (shouldHealNonStreaming && content) {
 		const healingResult = healJsonResponse(content);
 		pluginResults.responseHealing = {
 			healed: healingResult.healed,
