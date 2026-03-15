@@ -19,7 +19,25 @@ import { getModelHistory } from "@/lib/admin-history";
 import { cn } from "@/lib/utils";
 
 import type { HistoryWindow } from "@/components/history-chart";
-import type { ModelStats, TimeseriesRange } from "@/lib/types";
+import type { PageWindow } from "@/lib/page-window";
+import type { ModelStats } from "@/lib/types";
+
+function toHistoryWindow(pageWindow: PageWindow): HistoryWindow {
+	const map: Record<PageWindow, HistoryWindow> = {
+		"2m": "2m",
+		"5m": "5m",
+		"15m": "15m",
+		"1h": "1h",
+		"2h": "2h",
+		"4h": "4h",
+		"12h": "12h",
+		"24h": "24h",
+		"1d": "1d",
+		"2d": "2d",
+		"7d": "7d",
+	};
+	return map[pageWindow] ?? "24h";
+}
 
 type ModelSortBy =
 	| "name"
@@ -41,21 +59,21 @@ function SortableHeader({
 	currentSortBy,
 	currentSortOrder,
 	search,
-	range,
+	pageWindow,
 }: {
 	label: string;
 	sortKey: ModelSortBy;
 	currentSortBy: ModelSortBy;
 	currentSortOrder: SortOrder;
 	search: string;
-	range: TimeseriesRange;
+	pageWindow?: PageWindow;
 }) {
 	const isActive = currentSortBy === sortKey;
 	const nextOrder = isActive && currentSortOrder === "asc" ? "desc" : "asc";
 
 	const searchParam = search ? `&search=${encodeURIComponent(search)}` : "";
-	const rangeParam = range !== "all" ? `&range=${range}` : "";
-	const href = `/models?page=1&sortBy=${sortKey}&sortOrder=${nextOrder}${searchParam}${rangeParam}`;
+	const windowParam = pageWindow ? `&window=${pageWindow}` : "";
+	const href = `/models?page=1&sortBy=${sortKey}&sortOrder=${nextOrder}${searchParam}${windowParam}`;
 
 	return (
 		<Link
@@ -93,7 +111,13 @@ function formatDate(dateString: string) {
 	});
 }
 
-function ModelRow({ model }: { model: ModelStats }) {
+function ModelRow({
+	model,
+	externalWindow,
+}: {
+	model: ModelStats;
+	externalWindow?: HistoryWindow;
+}) {
 	const [expanded, setExpanded] = useState(false);
 	const errorRate =
 		model.logsCount > 0
@@ -197,6 +221,7 @@ function ModelRow({ model }: { model: ModelStats }) {
 							title={`${model.name !== model.id ? model.name : model.id} — History`}
 							description="Request volume, errors, latency, and tokens over time"
 							fetchData={fetchData}
+							externalWindow={externalWindow}
 						/>
 					</TableCell>
 				</TableRow>
@@ -210,14 +235,16 @@ export function ModelsTable({
 	sortBy = "logsCount",
 	sortOrder = "desc",
 	search = "",
-	range = "all",
+	pageWindow,
 }: {
 	models: ModelStats[];
 	sortBy?: ModelSortBy;
 	sortOrder?: SortOrder;
 	search?: string;
-	range?: TimeseriesRange;
+	pageWindow?: PageWindow;
 }) {
+	const externalWindow = pageWindow ? toHistoryWindow(pageWindow) : undefined;
+
 	const sh = (label: string, sortKey: ModelSortBy) => (
 		<TableHead>
 			<SortableHeader
@@ -226,7 +253,7 @@ export function ModelsTable({
 				currentSortBy={sortBy}
 				currentSortOrder={sortOrder}
 				search={search}
-				range={range}
+				pageWindow={pageWindow}
 			/>
 		</TableHead>
 	);
@@ -260,7 +287,9 @@ export function ModelsTable({
 						</TableCell>
 					</TableRow>
 				) : (
-					models.map((m) => <ModelRow key={m.id} model={m} />)
+					models.map((m) => (
+						<ModelRow key={m.id} model={m} externalWindow={externalWindow} />
+					))
 				)}
 			</TableBody>
 		</Table>

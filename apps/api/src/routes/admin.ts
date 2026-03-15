@@ -15,6 +15,7 @@ import {
 	inArray,
 	isNull,
 	lt,
+	lte,
 	ne,
 	or,
 	sql,
@@ -195,6 +196,8 @@ const getMetrics = createRoute({
 	request: {
 		query: z.object({
 			range: timeseriesRangeSchema.default("all").optional(),
+			from: z.string().optional(),
+			to: z.string().optional(),
 		}),
 	},
 	responses: {
@@ -375,22 +378,27 @@ const getOrganizationMembers = createRoute({
 
 admin.openapi(getMetrics, async (c) => {
 	const query = c.req.valid("query");
-	const range = query.range ?? "all";
-
-	const rangeDays: Record<string, number | null> = {
-		"7d": 7,
-		"30d": 30,
-		"90d": 90,
-		"365d": 365,
-		all: null,
-	};
-	const days = range in rangeDays ? rangeDays[range] : null;
+	const { from, to } = query;
 
 	let startDate: Date | null = null;
-	if (days !== null) {
-		// eslint-disable-next-line no-mixed-operators
-		startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+	if (from && to) {
+		startDate = new Date(from + "T00:00:00");
 		startDate.setUTCHours(0, 0, 0, 0);
+	} else {
+		const range = query.range ?? "all";
+		const rangeDays: Record<string, number | null> = {
+			"7d": 7,
+			"30d": 30,
+			"90d": 90,
+			"365d": 365,
+			all: null,
+		};
+		const days = range in rangeDays ? rangeDays[range] : null;
+		if (days !== null) {
+			// eslint-disable-next-line no-mixed-operators
+			startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+			startDate.setUTCHours(0, 0, 0, 0);
+		}
 	}
 
 	// Total signups
@@ -559,6 +567,8 @@ const getTimeseries = createRoute({
 	request: {
 		query: z.object({
 			range: timeseriesRangeSchema.default("all").optional(),
+			from: z.string().optional(),
+			to: z.string().optional(),
 		}),
 	},
 	responses: {
@@ -575,35 +585,42 @@ const getTimeseries = createRoute({
 
 admin.openapi(getTimeseries, async (c) => {
 	const query = c.req.valid("query");
-	const range = query.range ?? "all";
+	const { from, to } = query;
 
 	const now = new Date();
-	const rangeDays: Record<string, number | null> = {
-		"7d": 7,
-		"30d": 30,
-		"90d": 90,
-		"365d": 365,
-		all: null,
-	};
-	const days = range in rangeDays ? rangeDays[range] : 30;
-
 	let startDate: Date;
-	if (days === null) {
-		const [oldest] = await db
-			.select({
-				minDate: sql<string>`MIN(${tables.user.createdAt})`.as("minDate"),
-			})
-			.from(tables.user);
-		startDate = oldest?.minDate ? new Date(oldest.minDate) : now;
-	} else {
-		// eslint-disable-next-line no-mixed-operators
-		startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-	}
-
-	// Normalize to start of day in UTC
-	startDate.setUTCHours(0, 0, 0, 0);
 	const endDate = new Date(now);
 	endDate.setUTCHours(23, 59, 59, 999);
+
+	if (from && to) {
+		startDate = new Date(from + "T00:00:00");
+		startDate.setUTCHours(0, 0, 0, 0);
+		endDate.setTime(new Date(to + "T23:59:59").getTime());
+		endDate.setUTCHours(23, 59, 59, 999);
+	} else {
+		const range = query.range ?? "all";
+		const rangeDays: Record<string, number | null> = {
+			"7d": 7,
+			"30d": 30,
+			"90d": 90,
+			"365d": 365,
+			all: null,
+		};
+		const days = range in rangeDays ? rangeDays[range] : 30;
+
+		if (days === null) {
+			const [oldest] = await db
+				.select({
+					minDate: sql<string>`MIN(${tables.user.createdAt})`.as("minDate"),
+				})
+				.from(tables.user);
+			startDate = oldest?.minDate ? new Date(oldest.minDate) : now;
+		} else {
+			// eslint-disable-next-line no-mixed-operators
+			startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+		}
+		startDate.setUTCHours(0, 0, 0, 0);
+	}
 
 	// Signups per day
 	const signupsPerDay = await db
@@ -749,7 +766,7 @@ admin.openapi(getTimeseries, async (c) => {
 	}
 
 	return c.json({
-		range,
+		range: query.range ?? "all",
 		data,
 		totals: {
 			signups: totalSignups,
@@ -1556,16 +1573,24 @@ const logEntrySchema = z.object({
 	usedProvider: z.string(),
 	usedModelMapping: z.string().nullable(),
 	requestId: z.string().nullable(),
+	projectId: z.string(),
+	organizationId: z.string(),
+	apiKeyId: z.string(),
 	promptTokens: z.string().nullable(),
 	completionTokens: z.string().nullable(),
 	totalTokens: z.string().nullable(),
 	reasoningTokens: z.string().nullable(),
 	cachedTokens: z.string().nullable(),
+	imageInputTokens: z.string().nullable(),
+	imageOutputTokens: z.string().nullable(),
 	cost: z.number().nullable(),
 	inputCost: z.number().nullable(),
 	outputCost: z.number().nullable(),
 	cachedInputCost: z.number().nullable(),
 	requestCost: z.number().nullable(),
+	webSearchCost: z.number().nullable(),
+	imageInputCost: z.number().nullable(),
+	imageOutputCost: z.number().nullable(),
 	dataStorageCost: z.number().nullable(),
 	hasError: z.boolean().nullable(),
 	errorDetails: z.any().nullable(),
@@ -1573,12 +1598,35 @@ const logEntrySchema = z.object({
 	unifiedFinishReason: z.string().nullable(),
 	cached: z.boolean().nullable(),
 	streamed: z.boolean().nullable(),
+	canceled: z.boolean().nullable(),
+	retried: z.boolean().nullable(),
+	retriedByLogId: z.string().nullable(),
 	source: z.string().nullable(),
 	content: z.string().nullable(),
+	reasoningContent: z.string().nullable(),
+	mode: z.string(),
 	usedMode: z.string(),
 	discount: z.number().nullable(),
+	pricingTier: z.string().nullable(),
 	timeToFirstToken: z.number().nullable(),
+	timeToFirstReasoningToken: z.number().nullable(),
 	responseSize: z.number().nullable(),
+	temperature: z.number().nullable(),
+	maxTokens: z.number().nullable(),
+	topP: z.number().nullable(),
+	frequencyPenalty: z.number().nullable(),
+	reasoningEffort: z.string().nullable(),
+	reasoningMaxTokens: z.number().nullable(),
+	effort: z.string().nullable(),
+	responseFormat: z.any().nullable(),
+	tools: z.any().nullable(),
+	toolChoice: z.any().nullable(),
+	toolResults: z.any().nullable(),
+	messages: z.any().nullable(),
+	params: z.any().nullable(),
+	plugins: z.array(z.string()).nullable(),
+	pluginResults: z.any().nullable(),
+	customHeaders: z.any().nullable(),
 	routingMetadata: z.any().nullable(),
 });
 
@@ -1676,16 +1724,24 @@ admin.openapi(getProjectLogs, async (c) => {
 			usedProvider: tables.log.usedProvider,
 			usedModelMapping: tables.log.usedModelMapping,
 			requestId: tables.log.requestId,
+			projectId: tables.log.projectId,
+			organizationId: tables.log.organizationId,
+			apiKeyId: tables.log.apiKeyId,
 			promptTokens: tables.log.promptTokens,
 			completionTokens: tables.log.completionTokens,
 			totalTokens: tables.log.totalTokens,
 			reasoningTokens: tables.log.reasoningTokens,
 			cachedTokens: tables.log.cachedTokens,
+			imageInputTokens: tables.log.imageInputTokens,
+			imageOutputTokens: tables.log.imageOutputTokens,
 			cost: tables.log.cost,
 			inputCost: tables.log.inputCost,
 			outputCost: tables.log.outputCost,
 			cachedInputCost: tables.log.cachedInputCost,
 			requestCost: tables.log.requestCost,
+			webSearchCost: tables.log.webSearchCost,
+			imageInputCost: tables.log.imageInputCost,
+			imageOutputCost: tables.log.imageOutputCost,
 			dataStorageCost: tables.log.dataStorageCost,
 			hasError: tables.log.hasError,
 			errorDetails: tables.log.errorDetails,
@@ -1693,12 +1749,35 @@ admin.openapi(getProjectLogs, async (c) => {
 			unifiedFinishReason: tables.log.unifiedFinishReason,
 			cached: tables.log.cached,
 			streamed: tables.log.streamed,
+			canceled: tables.log.canceled,
+			retried: tables.log.retried,
+			retriedByLogId: tables.log.retriedByLogId,
 			source: tables.log.source,
 			content: tables.log.content,
+			reasoningContent: tables.log.reasoningContent,
+			mode: tables.log.mode,
 			usedMode: tables.log.usedMode,
 			discount: tables.log.discount,
+			pricingTier: tables.log.pricingTier,
 			timeToFirstToken: tables.log.timeToFirstToken,
+			timeToFirstReasoningToken: tables.log.timeToFirstReasoningToken,
 			responseSize: tables.log.responseSize,
+			temperature: tables.log.temperature,
+			maxTokens: tables.log.maxTokens,
+			topP: tables.log.topP,
+			frequencyPenalty: tables.log.frequencyPenalty,
+			reasoningEffort: tables.log.reasoningEffort,
+			reasoningMaxTokens: tables.log.reasoningMaxTokens,
+			effort: tables.log.effort,
+			responseFormat: tables.log.responseFormat,
+			tools: tables.log.tools,
+			toolChoice: tables.log.toolChoice,
+			toolResults: tables.log.toolResults,
+			messages: tables.log.messages,
+			params: tables.log.params,
+			plugins: tables.log.plugins,
+			pluginResults: tables.log.pluginResults,
+			customHeaders: tables.log.customHeaders,
 			routingMetadata: tables.log.routingMetadata,
 		})
 		.from(tables.log)
@@ -1721,6 +1800,11 @@ admin.openapi(getProjectLogs, async (c) => {
 			totalTokens: l.totalTokens ? String(l.totalTokens) : null,
 			reasoningTokens: l.reasoningTokens ? String(l.reasoningTokens) : null,
 			cachedTokens: l.cachedTokens ? String(l.cachedTokens) : null,
+			imageInputTokens: l.imageInputTokens ? String(l.imageInputTokens) : null,
+			imageOutputTokens: l.imageOutputTokens
+				? String(l.imageOutputTokens)
+				: null,
+			dataStorageCost: l.dataStorageCost ? Number(l.dataStorageCost) : null,
 			createdAt: l.createdAt.toISOString(),
 		})),
 		pagination: {
@@ -2302,12 +2386,16 @@ const providerStatsSchema = z.object({
 	cachedCount: z.number(),
 	avgTimeToFirstToken: z.number().nullable(),
 	modelCount: z.number(),
+	totalTokens: z.number(),
+	totalCost: z.number(),
 	updatedAt: z.string(),
 });
 
 const providersListSchema = z.object({
 	providers: z.array(providerStatsSchema),
 	total: z.number(),
+	totalTokens: z.number(),
+	totalCost: z.number(),
 });
 
 const getProviderStats = createRoute({
@@ -2317,6 +2405,8 @@ const getProviderStats = createRoute({
 		query: z.object({
 			sortBy: providerSortBySchema.default("logsCount").optional(),
 			sortOrder: sortOrderSchema.default("desc").optional(),
+			from: z.string().optional(),
+			to: z.string().optional(),
 		}),
 	},
 	responses: {
@@ -2335,6 +2425,7 @@ admin.openapi(getProviderStats, async (c) => {
 	const query = c.req.valid("query");
 	const sortBy = query.sortBy ?? "logsCount";
 	const sortOrder = query.sortOrder ?? "desc";
+	const { from, to } = query;
 
 	const modelCountSub = db
 		.select({
@@ -2344,6 +2435,113 @@ admin.openapi(getProviderStats, async (c) => {
 		.from(tables.modelProviderMapping)
 		.groupBy(tables.modelProviderMapping.providerId)
 		.as("model_count_sub");
+
+	if (from && to) {
+		let startDate: Date;
+		let endDateExclusive: Date;
+		if (from.includes("T") || from.includes("Z")) {
+			startDate = new Date(from);
+			endDateExclusive = new Date(to);
+		} else {
+			startDate = new Date(from + "T00:00:00");
+			startDate.setUTCHours(0, 0, 0, 0);
+			endDateExclusive = new Date(to + "T00:00:00");
+			endDateExclusive.setUTCHours(0, 0, 0, 0);
+			endDateExclusive.setDate(endDateExclusive.getDate() + 1);
+		}
+
+		const [statsRows, providerRows, modelCountRows] = await Promise.all([
+			db
+				.select({
+					usedProvider: projectHourlyModelStats.usedProvider,
+					logsCount: sql<number>`SUM(${projectHourlyModelStats.requestCount})`,
+					errorsCount: sql<number>`SUM(${projectHourlyModelStats.errorCount})`,
+					cachedCount: sql<number>`SUM(${projectHourlyModelStats.cacheCount})`,
+					totalTokens: sql<number>`SUM(CAST(${projectHourlyModelStats.totalTokens} AS NUMERIC))`,
+					totalCost: sql<number>`SUM(${projectHourlyModelStats.cost})`,
+				})
+				.from(projectHourlyModelStats)
+				.where(
+					and(
+						gte(projectHourlyModelStats.hourTimestamp, startDate),
+						lt(projectHourlyModelStats.hourTimestamp, endDateExclusive),
+					),
+				)
+				.groupBy(projectHourlyModelStats.usedProvider),
+			db
+				.select({
+					id: tables.provider.id,
+					name: tables.provider.name,
+					color: tables.provider.color,
+					status: tables.provider.status,
+					avgTimeToFirstToken: tables.provider.avgTimeToFirstToken,
+					updatedAt: tables.provider.updatedAt,
+				})
+				.from(tables.provider),
+			db
+				.select({
+					providerId: tables.modelProviderMapping.providerId,
+					count: sql<number>`COUNT(*)`,
+				})
+				.from(tables.modelProviderMapping)
+				.groupBy(tables.modelProviderMapping.providerId),
+		]);
+
+		const statsMap = new Map(
+			statsRows.map((r) => [
+				r.usedProvider,
+				{
+					logsCount: Number(r.logsCount ?? 0),
+					errorsCount: Number(r.errorsCount ?? 0),
+					cachedCount: Number(r.cachedCount ?? 0),
+					totalTokens: Number(r.totalTokens ?? 0),
+					totalCost: Number(r.totalCost ?? 0),
+				},
+			]),
+		);
+		const modelCountMap = new Map(
+			modelCountRows.map((r) => [r.providerId, Number(r.count ?? 0)]),
+		);
+
+		const merged = providerRows.map((p) => ({
+			id: p.id,
+			name: p.name,
+			color: p.color,
+			status: p.status,
+			logsCount: statsMap.get(p.id)?.logsCount ?? 0,
+			errorsCount: statsMap.get(p.id)?.errorsCount ?? 0,
+			cachedCount: statsMap.get(p.id)?.cachedCount ?? 0,
+			avgTimeToFirstToken: p.avgTimeToFirstToken,
+			modelCount: modelCountMap.get(p.id) ?? 0,
+			totalTokens: statsMap.get(p.id)?.totalTokens ?? 0,
+			totalCost: statsMap.get(p.id)?.totalCost ?? 0,
+			updatedAt: p.updatedAt.toISOString(),
+		}));
+
+		type MergedProvider = (typeof merged)[number];
+		const sortKey = sortBy as keyof MergedProvider;
+		merged.sort((a, b) => {
+			const av = a[sortKey] ?? 0;
+			const bv = b[sortKey] ?? 0;
+			if (av < bv) {
+				return sortOrder === "asc" ? -1 : 1;
+			}
+			if (av > bv) {
+				return sortOrder === "asc" ? 1 : -1;
+			}
+			return 0;
+		});
+
+		const totalTokensAgg = merged.reduce((s, p) => s + p.totalTokens, 0);
+		const totalCostAgg = merged.reduce((s, p) => s + p.totalCost, 0);
+
+		return c.json({
+			providers: merged,
+			total: merged.length,
+			totalTokens: totalTokensAgg,
+			totalCost: totalCostAgg,
+		});
+	}
 
 	const orderFn = sortOrder === "asc" ? asc : desc;
 
@@ -2390,9 +2588,13 @@ admin.openapi(getProviderStats, async (c) => {
 			cachedCount: r.cachedCount,
 			avgTimeToFirstToken: r.avgTimeToFirstToken,
 			modelCount: Number(r.modelCount),
+			totalTokens: 0,
+			totalCost: 0,
 			updatedAt: r.updatedAt.toISOString(),
 		})),
 		total: rows.length,
+		totalTokens: 0,
+		totalCost: 0,
 	});
 });
 
@@ -2421,6 +2623,8 @@ const modelStatsSchema = z.object({
 	cachedCount: z.number(),
 	avgTimeToFirstToken: z.number().nullable(),
 	providerCount: z.number(),
+	totalTokens: z.number(),
+	totalCost: z.number(),
 	updatedAt: z.string(),
 });
 
@@ -2429,6 +2633,8 @@ const modelsListSchema = z.object({
 	total: z.number(),
 	limit: z.number(),
 	offset: z.number(),
+	totalTokens: z.number(),
+	totalCost: z.number(),
 });
 
 const getModelStats = createRoute({
@@ -2442,6 +2648,8 @@ const getModelStats = createRoute({
 			sortOrder: sortOrderSchema.default("desc").optional(),
 			limit: z.coerce.number().min(1).max(100).default(50).optional(),
 			offset: z.coerce.number().min(0).default(0).optional(),
+			from: z.string().optional(),
+			to: z.string().optional(),
 		}),
 	},
 	responses: {
@@ -2464,15 +2672,7 @@ admin.openapi(getModelStats, async (c) => {
 	const sortOrderVal = query.sortOrder ?? "desc";
 	const limit = query.limit ?? 50;
 	const offset = query.offset ?? 0;
-
-	const providerCountSub = db
-		.select({
-			modelId: tables.modelProviderMapping.modelId,
-			count: sql<number>`COUNT(*)`.as("provider_count"),
-		})
-		.from(tables.modelProviderMapping)
-		.groupBy(tables.modelProviderMapping.modelId)
-		.as("provider_count_sub");
+	const { from, to } = query;
 
 	const conditions = [];
 	if (search) {
@@ -2487,13 +2687,135 @@ admin.openapi(getModelStats, async (c) => {
 	if (family) {
 		conditions.push(eq(tables.model.family, family));
 	}
-
 	const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-	const [countResult] = await db
+	if (from && to) {
+		let startDate: Date;
+		let endDateExclusive: Date;
+		if (from.includes("T") || from.includes("Z")) {
+			startDate = new Date(from);
+			endDateExclusive = new Date(to);
+		} else {
+			startDate = new Date(from + "T00:00:00");
+			startDate.setUTCHours(0, 0, 0, 0);
+			endDateExclusive = new Date(to + "T00:00:00");
+			endDateExclusive.setUTCHours(0, 0, 0, 0);
+			endDateExclusive.setDate(endDateExclusive.getDate() + 1);
+		}
+
+		const [statsRows, modelRows, providerCountRows] = await Promise.all([
+			db
+				.select({
+					modelId: modelHistory.modelId,
+					logsCount: sql<number>`SUM(${modelHistory.logsCount})`,
+					errorsCount: sql<number>`SUM(${modelHistory.errorsCount})`,
+					cachedCount: sql<number>`SUM(${modelHistory.cachedCount})`,
+					totalTokens: sql<number>`SUM(CAST(${modelHistory.totalTokens} AS NUMERIC))`,
+					totalCost: sql<number>`SUM(${modelHistory.totalCost})`,
+				})
+				.from(modelHistory)
+				.where(
+					and(
+						gte(modelHistory.minuteTimestamp, startDate),
+						lt(modelHistory.minuteTimestamp, endDateExclusive),
+					),
+				)
+				.groupBy(modelHistory.modelId),
+			db
+				.select({
+					id: tables.model.id,
+					name: tables.model.name,
+					family: tables.model.family,
+					free: tables.model.free,
+					stability: tables.model.stability,
+					status: tables.model.status,
+					avgTimeToFirstToken: tables.model.avgTimeToFirstToken,
+					updatedAt: tables.model.updatedAt,
+				})
+				.from(tables.model)
+				.where(whereClause),
+			db
+				.select({
+					modelId: tables.modelProviderMapping.modelId,
+					count: sql<number>`COUNT(*)`,
+				})
+				.from(tables.modelProviderMapping)
+				.groupBy(tables.modelProviderMapping.modelId),
+		]);
+
+		const statsMap = new Map(
+			statsRows.map((r) => [
+				r.modelId,
+				{
+					logsCount: Number(r.logsCount ?? 0),
+					errorsCount: Number(r.errorsCount ?? 0),
+					cachedCount: Number(r.cachedCount ?? 0),
+					totalTokens: Number(r.totalTokens ?? 0),
+					totalCost: Number(r.totalCost ?? 0),
+				},
+			]),
+		);
+		const providerCountMap = new Map(
+			providerCountRows.map((r) => [r.modelId, Number(r.count ?? 0)]),
+		);
+
+		const merged = modelRows.map((m) => ({
+			id: m.id,
+			name: m.name,
+			family: m.family,
+			free: m.free,
+			stability: m.stability,
+			status: m.status,
+			logsCount: statsMap.get(m.id)?.logsCount ?? 0,
+			errorsCount: statsMap.get(m.id)?.errorsCount ?? 0,
+			cachedCount: statsMap.get(m.id)?.cachedCount ?? 0,
+			avgTimeToFirstToken: m.avgTimeToFirstToken,
+			providerCount: providerCountMap.get(m.id) ?? 0,
+			totalTokens: statsMap.get(m.id)?.totalTokens ?? 0,
+			totalCost: statsMap.get(m.id)?.totalCost ?? 0,
+			updatedAt: m.updatedAt.toISOString(),
+		}));
+
+		type MergedModel = (typeof merged)[number];
+		const sortKey = sortBy as keyof MergedModel;
+		merged.sort((a, b) => {
+			const av = a[sortKey] ?? 0;
+			const bv = b[sortKey] ?? 0;
+			if (av < bv) {
+				return sortOrderVal === "asc" ? -1 : 1;
+			}
+			if (av > bv) {
+				return sortOrderVal === "asc" ? 1 : -1;
+			}
+			return 0;
+		});
+
+		const total = merged.length;
+		const paginated = merged.slice(offset, offset + limit);
+		const totalTokensAgg = merged.reduce((s, m) => s + m.totalTokens, 0);
+		const totalCostAgg = merged.reduce((s, m) => s + m.totalCost, 0);
+
+		return c.json({
+			models: paginated,
+			total,
+			limit,
+			offset,
+			totalTokens: totalTokensAgg,
+			totalCost: totalCostAgg,
+		});
+	}
+
+	const providerCountSub = db
 		.select({
-			count: sql<number>`COUNT(*)`.as("count"),
+			modelId: tables.modelProviderMapping.modelId,
+			count: sql<number>`COUNT(*)`.as("provider_count"),
 		})
+		.from(tables.modelProviderMapping)
+		.groupBy(tables.modelProviderMapping.modelId)
+		.as("provider_count_sub");
+
+	const [countResult] = await db
+		.select({ count: sql<number>`COUNT(*)`.as("count") })
 		.from(tables.model)
 		.where(whereClause);
 
@@ -2553,11 +2875,15 @@ admin.openapi(getModelStats, async (c) => {
 			cachedCount: r.cachedCount,
 			avgTimeToFirstToken: r.avgTimeToFirstToken,
 			providerCount: Number(r.providerCount),
+			totalTokens: 0,
+			totalCost: 0,
 			updatedAt: r.updatedAt.toISOString(),
 		})),
 		total,
 		limit,
 		offset,
+		totalTokens: 0,
+		totalCost: 0,
 	});
 });
 
@@ -2617,17 +2943,35 @@ admin.openapi(getModelDetail, async (c) => {
 		throw new HTTPException(404, { message: "Model not found" });
 	}
 
-	const mappings = await db
-		.select({
-			providerId: tables.modelProviderMapping.providerId,
-			logsCount: tables.modelProviderMapping.logsCount,
-			errorsCount: tables.modelProviderMapping.errorsCount,
-			cachedCount: tables.modelProviderMapping.cachedCount,
-			avgTimeToFirstToken: tables.modelProviderMapping.avgTimeToFirstToken,
-			updatedAt: tables.modelProviderMapping.updatedAt,
-		})
-		.from(tables.modelProviderMapping)
-		.where(eq(tables.modelProviderMapping.modelId, modelId));
+	const [mappings, statsRows] = await Promise.all([
+		db
+			.select({
+				providerId: tables.modelProviderMapping.providerId,
+				avgTimeToFirstToken: tables.modelProviderMapping.avgTimeToFirstToken,
+				updatedAt: tables.modelProviderMapping.updatedAt,
+			})
+			.from(tables.modelProviderMapping)
+			.where(eq(tables.modelProviderMapping.modelId, modelId)),
+		db
+			.select({
+				providerId: modelProviderMappingHistory.providerId,
+				logsCount:
+					sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
+						"logs_count",
+					),
+				errorsCount:
+					sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
+						"errors_count",
+					),
+				cachedCount:
+					sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
+						"cached_count",
+					),
+			})
+			.from(modelProviderMappingHistory)
+			.where(eq(modelProviderMappingHistory.modelId, modelId))
+			.groupBy(modelProviderMappingHistory.providerId),
+	]);
 
 	const providerIds = mappings.map((m) => m.providerId);
 	const providerRows =
@@ -2638,16 +2982,29 @@ admin.openapi(getModelDetail, async (c) => {
 			: [];
 
 	const providerNameMap = new Map(providerRows.map((p) => [p.id, p.name]));
+	const providerStatsMap = new Map(
+		statsRows.map((r) => [
+			r.providerId,
+			{
+				logsCount: Number(r.logsCount ?? 0),
+				errorsCount: Number(r.errorsCount ?? 0),
+				cachedCount: Number(r.cachedCount ?? 0),
+			},
+		]),
+	);
 
-	const providerStats = mappings.map((m) => ({
-		providerId: m.providerId,
-		providerName: providerNameMap.get(m.providerId) ?? m.providerId,
-		logsCount: m.logsCount,
-		errorsCount: m.errorsCount,
-		cachedCount: m.cachedCount,
-		avgTimeToFirstToken: m.avgTimeToFirstToken,
-		updatedAt: m.updatedAt.toISOString(),
-	}));
+	const providerStats = mappings.map((m) => {
+		const stats = providerStatsMap.get(m.providerId);
+		return {
+			providerId: m.providerId,
+			providerName: providerNameMap.get(m.providerId) ?? m.providerId,
+			logsCount: stats?.logsCount ?? 0,
+			errorsCount: stats?.errorsCount ?? 0,
+			cachedCount: stats?.cachedCount ?? 0,
+			avgTimeToFirstToken: m.avgTimeToFirstToken,
+			updatedAt: m.updatedAt.toISOString(),
+		};
+	});
 
 	return c.json({
 		model: {
@@ -2825,14 +3182,17 @@ admin.openapi(deleteUserRoute, async (c) => {
 // --- History endpoints ---
 
 const historyWindowSchema = z.enum([
-	"1m",
 	"2m",
 	"5m",
-	"30m",
+	"15m",
 	"1h",
 	"2h",
 	"4h",
+	"12h",
 	"24h",
+	"1d",
+	"2d",
+	"7d",
 ]);
 
 const historyDataPointSchema = z.object({
@@ -2843,6 +3203,7 @@ const historyDataPointSchema = z.object({
 	avgTtft: z.number().nullable(),
 	avgDuration: z.number().nullable(),
 	totalTokens: z.number(),
+	totalCost: z.number(),
 });
 
 const historyResponseSchema = z.object({
@@ -2851,18 +3212,27 @@ const historyResponseSchema = z.object({
 
 function getHistoryStartDate(window: string): Date {
 	const windowMinutes: Record<string, number> = {
-		"1m": 1,
 		"2m": 2,
 		"5m": 5,
-		"30m": 30,
+		"15m": 15,
 		"1h": 60,
 		"2h": 120,
 		"4h": 240,
+		"12h": 720,
 		"24h": 1440,
+		"1d": 1440,
+		"2d": 2880,
+		"7d": 10080,
 	};
 	const minutes = windowMinutes[window] ?? 240;
-	// eslint-disable-next-line no-mixed-operators
-	return new Date(Date.now() - minutes * 60 * 1000);
+	const ms = minutes * 60 * 1000;
+	return new Date(Date.now() - ms);
+}
+
+function getHourFloor(date: Date): string {
+	const d = new Date(date);
+	d.setMinutes(0, 0, 0);
+	return d.toISOString();
 }
 
 function mapHistoryRows(
@@ -2875,7 +3245,14 @@ function mapHistoryRows(
 		totalTimeToFirstToken: number;
 		totalTokens: number;
 	}[],
+	costByHour: Map<string, number> = new Map(),
 ) {
+	const requestsByHour = new Map<string, number>();
+	for (const r of rows) {
+		const hk = getHourFloor(r.minuteTimestamp);
+		requestsByHour.set(hk, (requestsByHour.get(hk) ?? 0) + Number(r.logsCount));
+	}
+
 	return rows.map((r) => {
 		const logsCount = Number(r.logsCount);
 		const errorsCount = Number(r.errorsCount);
@@ -2884,6 +3261,12 @@ function mapHistoryRows(
 		const totalTimeToFirstToken = Number(r.totalTimeToFirstToken);
 		const totalTokens = Number(r.totalTokens);
 		const nonCached = logsCount - cachedCount;
+
+		const hk = getHourFloor(r.minuteTimestamp);
+		const hourCost = costByHour.get(hk) ?? 0;
+		const hourReqs = requestsByHour.get(hk) ?? 0;
+		const totalCost = hourReqs > 0 ? (logsCount / hourReqs) * hourCost : 0;
+
 		return {
 			timestamp: r.minuteTimestamp.toISOString(),
 			logsCount,
@@ -2893,6 +3276,7 @@ function mapHistoryRows(
 				nonCached > 0 ? Math.round(totalTimeToFirstToken / nonCached) : null,
 			avgDuration: logsCount > 0 ? Math.round(totalDuration / logsCount) : null,
 			totalTokens,
+			totalCost,
 		};
 	});
 }
@@ -2922,45 +3306,71 @@ admin.openapi(getProviderHistory, async (c) => {
 	const query = c.req.valid("query");
 	const window = query.window ?? "4h";
 	const startDate = getHistoryStartDate(window);
+	const hourStartDate = new Date(startDate);
+	hourStartDate.setMinutes(0, 0, 0);
 
-	const rows = await db
-		.select({
-			minuteTimestamp: modelProviderMappingHistory.minuteTimestamp,
-			logsCount: sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
-				"logs_count",
-			),
-			errorsCount:
-				sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
-					"errors_count",
+	const [rows, costRows] = await Promise.all([
+		db
+			.select({
+				minuteTimestamp: modelProviderMappingHistory.minuteTimestamp,
+				logsCount:
+					sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
+						"logs_count",
+					),
+				errorsCount:
+					sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
+						"errors_count",
+					),
+				cachedCount:
+					sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
+						"cached_count",
+					),
+				totalDuration:
+					sql<number>`SUM(${modelProviderMappingHistory.totalDuration})`.as(
+						"total_duration",
+					),
+				totalTimeToFirstToken:
+					sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
+						"total_ttft",
+					),
+				totalTokens:
+					sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
+						"total_tokens",
+					),
+			})
+			.from(modelProviderMappingHistory)
+			.where(
+				and(
+					eq(modelProviderMappingHistory.providerId, providerId),
+					gte(modelProviderMappingHistory.minuteTimestamp, startDate),
 				),
-			cachedCount:
-				sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
-					"cached_count",
+			)
+			.groupBy(modelProviderMappingHistory.minuteTimestamp)
+			.orderBy(asc(modelProviderMappingHistory.minuteTimestamp)),
+		db
+			.select({
+				hourTimestamp: projectHourlyModelStats.hourTimestamp,
+				cost: sql<number>`SUM(${projectHourlyModelStats.cost})`,
+			})
+			.from(projectHourlyModelStats)
+			.where(
+				and(
+					eq(projectHourlyModelStats.usedProvider, providerId),
+					gte(projectHourlyModelStats.hourTimestamp, hourStartDate),
 				),
-			totalDuration:
-				sql<number>`SUM(${modelProviderMappingHistory.totalDuration})`.as(
-					"total_duration",
-				),
-			totalTimeToFirstToken:
-				sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
-					"total_ttft",
-				),
-			totalTokens:
-				sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
-					"total_tokens",
-				),
-		})
-		.from(modelProviderMappingHistory)
-		.where(
-			and(
-				eq(modelProviderMappingHistory.providerId, providerId),
-				gte(modelProviderMappingHistory.minuteTimestamp, startDate),
-			),
-		)
-		.groupBy(modelProviderMappingHistory.minuteTimestamp)
-		.orderBy(asc(modelProviderMappingHistory.minuteTimestamp));
+			)
+			.groupBy(projectHourlyModelStats.hourTimestamp),
+	]);
 
-	return c.json({ data: mapHistoryRows(rows) });
+	const costByHour = new Map<string, number>(
+		costRows.map((r) => {
+			const d = new Date(r.hourTimestamp);
+			d.setMinutes(0, 0, 0);
+			return [d.toISOString(), Number(r.cost)];
+		}),
+	);
+
+	return c.json({ data: mapHistoryRows(rows, costByHour) });
 });
 
 // Model history
@@ -2988,39 +3398,64 @@ admin.openapi(getModelHistory, async (c) => {
 	const query = c.req.valid("query");
 	const window = query.window ?? "4h";
 	const startDate = getHistoryStartDate(window);
+	const hourStartDate = new Date(startDate);
+	hourStartDate.setMinutes(0, 0, 0);
 
-	const rows = await db
-		.select({
-			minuteTimestamp: modelHistory.minuteTimestamp,
-			logsCount: sql<number>`SUM(${modelHistory.logsCount})`.as("logs_count"),
-			errorsCount: sql<number>`SUM(${modelHistory.errorsCount})`.as(
-				"errors_count",
-			),
-			cachedCount: sql<number>`SUM(${modelHistory.cachedCount})`.as(
-				"cached_count",
-			),
-			totalDuration: sql<number>`SUM(${modelHistory.totalDuration})`.as(
-				"total_duration",
-			),
-			totalTimeToFirstToken:
-				sql<number>`SUM(${modelHistory.totalTimeToFirstToken})`.as(
-					"total_ttft",
+	const [rows, costRows] = await Promise.all([
+		db
+			.select({
+				minuteTimestamp: modelHistory.minuteTimestamp,
+				logsCount: sql<number>`SUM(${modelHistory.logsCount})`.as("logs_count"),
+				errorsCount: sql<number>`SUM(${modelHistory.errorsCount})`.as(
+					"errors_count",
 				),
-			totalTokens: sql<number>`SUM(${modelHistory.totalTokens})`.as(
-				"total_tokens",
-			),
-		})
-		.from(modelHistory)
-		.where(
-			and(
-				eq(modelHistory.modelId, modelId),
-				gte(modelHistory.minuteTimestamp, startDate),
-			),
-		)
-		.groupBy(modelHistory.minuteTimestamp)
-		.orderBy(asc(modelHistory.minuteTimestamp));
+				cachedCount: sql<number>`SUM(${modelHistory.cachedCount})`.as(
+					"cached_count",
+				),
+				totalDuration: sql<number>`SUM(${modelHistory.totalDuration})`.as(
+					"total_duration",
+				),
+				totalTimeToFirstToken:
+					sql<number>`SUM(${modelHistory.totalTimeToFirstToken})`.as(
+						"total_ttft",
+					),
+				totalTokens: sql<number>`SUM(${modelHistory.totalTokens})`.as(
+					"total_tokens",
+				),
+			})
+			.from(modelHistory)
+			.where(
+				and(
+					eq(modelHistory.modelId, modelId),
+					gte(modelHistory.minuteTimestamp, startDate),
+				),
+			)
+			.groupBy(modelHistory.minuteTimestamp)
+			.orderBy(asc(modelHistory.minuteTimestamp)),
+		db
+			.select({
+				hourTimestamp: projectHourlyModelStats.hourTimestamp,
+				cost: sql<number>`SUM(${projectHourlyModelStats.cost})`,
+			})
+			.from(projectHourlyModelStats)
+			.where(
+				and(
+					eq(projectHourlyModelStats.usedModel, modelId),
+					gte(projectHourlyModelStats.hourTimestamp, hourStartDate),
+				),
+			)
+			.groupBy(projectHourlyModelStats.hourTimestamp),
+	]);
 
-	return c.json({ data: mapHistoryRows(rows) });
+	const costByHour = new Map<string, number>(
+		costRows.map((r) => {
+			const d = new Date(r.hourTimestamp);
+			d.setMinutes(0, 0, 0);
+			return [d.toISOString(), Number(r.cost)];
+		}),
+	);
+
+	return c.json({ data: mapHistoryRows(rows, costByHour) });
 });
 
 // Mapping history (provider + model)
@@ -3051,46 +3486,107 @@ admin.openapi(getMappingHistory, async (c) => {
 	const query = c.req.valid("query");
 	const window = query.window ?? "4h";
 	const startDate = getHistoryStartDate(window);
+	const hourStartDate = new Date(startDate);
+	hourStartDate.setMinutes(0, 0, 0);
 
-	const rows = await db
-		.select({
-			minuteTimestamp: modelProviderMappingHistory.minuteTimestamp,
-			logsCount: sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
-				"logs_count",
-			),
-			errorsCount:
-				sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
+	const [minuteRows, hourlyRows] = await Promise.all([
+		db
+			.select({
+				minuteTimestamp: modelProviderMappingHistory.minuteTimestamp,
+				logsCount:
+					sql<number>`SUM(${modelProviderMappingHistory.logsCount})`.as(
+						"logs_count",
+					),
+				errorsCount:
+					sql<number>`SUM(${modelProviderMappingHistory.errorsCount})`.as(
+						"errors_count",
+					),
+				cachedCount:
+					sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
+						"cached_count",
+					),
+				totalDuration:
+					sql<number>`SUM(${modelProviderMappingHistory.totalDuration})`.as(
+						"total_duration",
+					),
+				totalTimeToFirstToken:
+					sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
+						"total_ttft",
+					),
+				totalTokens:
+					sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
+						"total_tokens",
+					),
+			})
+			.from(modelProviderMappingHistory)
+			.where(
+				and(
+					eq(modelProviderMappingHistory.providerId, providerId),
+					eq(modelProviderMappingHistory.modelId, modelId),
+					gte(modelProviderMappingHistory.minuteTimestamp, startDate),
+				),
+			)
+			.groupBy(modelProviderMappingHistory.minuteTimestamp)
+			.orderBy(asc(modelProviderMappingHistory.minuteTimestamp)),
+		db
+			.select({
+				hourTimestamp: projectHourlyModelStats.hourTimestamp,
+				logsCount: sql<number>`SUM(${projectHourlyModelStats.requestCount})`.as(
+					"logs_count",
+				),
+				errorsCount: sql<number>`SUM(${projectHourlyModelStats.errorCount})`.as(
 					"errors_count",
 				),
-			cachedCount:
-				sql<number>`SUM(${modelProviderMappingHistory.cachedCount})`.as(
+				cachedCount: sql<number>`SUM(${projectHourlyModelStats.cacheCount})`.as(
 					"cached_count",
 				),
-			totalDuration:
-				sql<number>`SUM(${modelProviderMappingHistory.totalDuration})`.as(
-					"total_duration",
+				totalTokens:
+					sql<number>`SUM(CAST(${projectHourlyModelStats.totalTokens} AS NUMERIC))`.as(
+						"total_tokens",
+					),
+				cost: sql<number>`SUM(${projectHourlyModelStats.cost})`.as("cost"),
+			})
+			.from(projectHourlyModelStats)
+			.where(
+				and(
+					eq(projectHourlyModelStats.usedProvider, providerId),
+					eq(projectHourlyModelStats.usedModel, modelId),
+					gte(projectHourlyModelStats.hourTimestamp, hourStartDate),
 				),
-			totalTimeToFirstToken:
-				sql<number>`SUM(${modelProviderMappingHistory.totalTimeToFirstToken})`.as(
-					"total_ttft",
-				),
-			totalTokens:
-				sql<number>`SUM(${modelProviderMappingHistory.totalTokens})`.as(
-					"total_tokens",
-				),
-		})
-		.from(modelProviderMappingHistory)
-		.where(
-			and(
-				eq(modelProviderMappingHistory.providerId, providerId),
-				eq(modelProviderMappingHistory.modelId, modelId),
-				gte(modelProviderMappingHistory.minuteTimestamp, startDate),
-			),
-		)
-		.groupBy(modelProviderMappingHistory.minuteTimestamp)
-		.orderBy(asc(modelProviderMappingHistory.minuteTimestamp));
+			)
+			.groupBy(projectHourlyModelStats.hourTimestamp)
+			.orderBy(asc(projectHourlyModelStats.hourTimestamp)),
+	]);
 
-	return c.json({ data: mapHistoryRows(rows) });
+	const hasMinuteData = minuteRows.some((r) => Number(r.logsCount) > 0);
+	if (hasMinuteData) {
+		const costByHour = new Map<string, number>(
+			hourlyRows.map((r) => {
+				const d = new Date(r.hourTimestamp);
+				d.setMinutes(0, 0, 0);
+				return [d.toISOString(), Number(r.cost)];
+			}),
+		);
+		return c.json({ data: mapHistoryRows(minuteRows, costByHour) });
+	}
+
+	const data = hourlyRows.map((r) => {
+		const logsCount = Number(r.logsCount);
+		const errorsCount = Number(r.errorsCount);
+		const cachedCount = Number(r.cachedCount);
+		return {
+			timestamp: new Date(r.hourTimestamp).toISOString(),
+			logsCount,
+			errorsCount,
+			cachedCount,
+			avgTtft: null,
+			avgDuration: null,
+			totalTokens: Number(r.totalTokens),
+			totalCost: Number(r.cost),
+		};
+	});
+
+	return c.json({ data });
 });
 
 // --- Cost by model endpoints ---
@@ -3131,6 +3627,8 @@ const getGlobalCostByModel = createRoute({
 	request: {
 		query: z.object({
 			window: tokenWindowSchema.default("7d").optional(),
+			from: z.string().optional(),
+			to: z.string().optional(),
 		}),
 	},
 	responses: {
@@ -3148,7 +3646,17 @@ const getGlobalCostByModel = createRoute({
 admin.openapi(getGlobalCostByModel, async (c) => {
 	const query = c.req.valid("query");
 	const window = query.window ?? "7d";
-	const startDate = getTokenWindowStartDate(window);
+
+	let startDate: Date;
+	let endDate: Date | undefined;
+	if (query.from && query.to) {
+		startDate = new Date(query.from + "T00:00:00");
+		startDate.setUTCHours(0, 0, 0, 0);
+		endDate = new Date(query.to + "T00:00:00");
+		endDate.setUTCHours(23, 59, 59, 999);
+	} else {
+		startDate = getTokenWindowStartDate(window);
+	}
 
 	const rows = await db
 		.select({
@@ -3164,7 +3672,14 @@ admin.openapi(getGlobalCostByModel, async (c) => {
 				),
 		})
 		.from(projectHourlyModelStats)
-		.where(gte(projectHourlyModelStats.hourTimestamp, startDate))
+		.where(
+			endDate
+				? and(
+						gte(projectHourlyModelStats.hourTimestamp, startDate),
+						lte(projectHourlyModelStats.hourTimestamp, endDate),
+					)
+				: gte(projectHourlyModelStats.hourTimestamp, startDate),
+		)
 		.groupBy(projectHourlyModelStats.usedModel)
 		.orderBy(desc(sql`SUM(${projectHourlyModelStats.cost})`))
 		.limit(20);
@@ -3283,6 +3798,164 @@ admin.openapi(getOrgCostByModel, async (c) => {
 		})),
 		totalCost,
 		totalRequests,
+	});
+});
+
+// --- Model-Provider Mappings list ---
+
+const modelProviderMappingEntrySchema = z.object({
+	id: z.string(),
+	modelId: z.string(),
+	modelName: z.string(),
+	providerId: z.string(),
+	providerName: z.string(),
+	status: z.string(),
+	logsCount: z.number(),
+	errorsCount: z.number(),
+	cachedCount: z.number(),
+	avgTimeToFirstToken: z.number().nullable(),
+	inputPrice: z.string().nullable(),
+	outputPrice: z.string().nullable(),
+	contextSize: z.number().nullable(),
+	updatedAt: z.string(),
+});
+
+const modelProviderMappingsListSchema = z.object({
+	mappings: z.array(modelProviderMappingEntrySchema),
+	total: z.number(),
+});
+
+const getModelProviderMappings = createRoute({
+	method: "get",
+	path: "/model-provider-mappings",
+	request: {
+		query: z.object({
+			search: z.string().optional(),
+			sortBy: z
+				.enum([
+					"modelId",
+					"providerId",
+					"logsCount",
+					"errorsCount",
+					"avgTimeToFirstToken",
+					"updatedAt",
+				])
+				.optional(),
+			sortOrder: z.enum(["asc", "desc"]).optional(),
+			limit: z.coerce.number().optional(),
+			offset: z.coerce.number().optional(),
+		}),
+	},
+	responses: {
+		200: {
+			content: {
+				"application/json": {
+					schema: modelProviderMappingsListSchema.openapi({}),
+				},
+			},
+			description: "List of all model-provider mappings.",
+		},
+	},
+});
+
+admin.openapi(getModelProviderMappings, async (c) => {
+	const query = c.req.valid("query");
+	const sortBy = query.sortBy ?? "logsCount";
+	const sortOrder = query.sortOrder ?? "desc";
+	const limit = query.limit ?? 100;
+	const offset = query.offset ?? 0;
+	const search = query.search ?? "";
+
+	const whereClause = search
+		? or(
+				sql`${tables.modelProviderMapping.modelId} ILIKE ${"%" + search + "%"}`,
+				sql`${tables.modelProviderMapping.providerId} ILIKE ${"%" + search + "%"}`,
+			)
+		: undefined;
+
+	// Fetch all mapping metadata rows
+	const [mappingRows, providerRows, statsRows] = await Promise.all([
+		db
+			.select({
+				id: tables.modelProviderMapping.id,
+				modelId: tables.modelProviderMapping.modelId,
+				modelName: tables.modelProviderMapping.modelName,
+				providerId: tables.modelProviderMapping.providerId,
+				status: tables.modelProviderMapping.status,
+				avgTimeToFirstToken: tables.modelProviderMapping.avgTimeToFirstToken,
+				inputPrice: tables.modelProviderMapping.inputPrice,
+				outputPrice: tables.modelProviderMapping.outputPrice,
+				contextSize: tables.modelProviderMapping.contextSize,
+				updatedAt: tables.modelProviderMapping.updatedAt,
+			})
+			.from(tables.modelProviderMapping)
+			.where(whereClause),
+		db.query.provider.findMany(),
+		// Aggregate real request counts from projectHourlyModelStats (same source models list uses)
+		db
+			.select({
+				usedModel: projectHourlyModelStats.usedModel,
+				usedProvider: projectHourlyModelStats.usedProvider,
+				logsCount: sql<number>`SUM(${projectHourlyModelStats.requestCount})`,
+				errorsCount: sql<number>`SUM(${projectHourlyModelStats.errorCount})`,
+				cachedCount: sql<number>`SUM(${projectHourlyModelStats.cacheCount})`,
+			})
+			.from(projectHourlyModelStats)
+			.groupBy(
+				projectHourlyModelStats.usedModel,
+				projectHourlyModelStats.usedProvider,
+			),
+	]);
+
+	const providerNameMap = new Map(providerRows.map((p) => [p.id, p.name]));
+	const statsKey = (model: string, provider: string) => `${model}::${provider}`;
+	const statsMap = new Map(
+		statsRows.map((r) => [
+			statsKey(r.usedModel, r.usedProvider),
+			{
+				logsCount: Number(r.logsCount ?? 0),
+				errorsCount: Number(r.errorsCount ?? 0),
+				cachedCount: Number(r.cachedCount ?? 0),
+			},
+		]),
+	);
+
+	const merged = mappingRows.map((r) => {
+		const stats = statsMap.get(statsKey(r.modelId, r.providerId));
+		return {
+			id: r.id,
+			modelId: r.modelId,
+			modelName: r.modelName,
+			providerId: r.providerId,
+			providerName: providerNameMap.get(r.providerId) ?? r.providerId,
+			status: r.status,
+			logsCount: stats?.logsCount ?? 0,
+			errorsCount: stats?.errorsCount ?? 0,
+			cachedCount: stats?.cachedCount ?? 0,
+			avgTimeToFirstToken: r.avgTimeToFirstToken,
+			inputPrice: r.inputPrice,
+			outputPrice: r.outputPrice,
+			contextSize: r.contextSize,
+			updatedAt: r.updatedAt.toISOString(),
+		};
+	});
+
+	type MergedRow = (typeof merged)[number];
+	merged.sort((a, b) => {
+		const av = a[sortBy as keyof MergedRow] ?? 0;
+		const bv = b[sortBy as keyof MergedRow] ?? 0;
+		if (av < bv) {
+			return sortOrder === "asc" ? -1 : 1;
+		}
+		if (av > bv) {
+			return sortOrder === "asc" ? 1 : -1;
+		}
+		return 0;
+	});
+
+	return c.json({
+		mappings: merged.slice(offset, offset + limit),
+		total: merged.length,
 	});
 });
 

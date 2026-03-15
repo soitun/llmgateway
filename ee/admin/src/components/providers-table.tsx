@@ -21,7 +21,25 @@ import { cn } from "@/lib/utils";
 import { getProviderIcon } from "@llmgateway/shared";
 
 import type { HistoryWindow } from "@/components/history-chart";
-import type { ProviderStats, TimeseriesRange } from "@/lib/types";
+import type { PageWindow } from "@/lib/page-window";
+import type { ProviderStats } from "@/lib/types";
+
+function toHistoryWindow(pageWindow: PageWindow): HistoryWindow {
+	const map: Record<PageWindow, HistoryWindow> = {
+		"2m": "2m",
+		"5m": "5m",
+		"15m": "15m",
+		"1h": "1h",
+		"2h": "2h",
+		"4h": "4h",
+		"12h": "12h",
+		"24h": "24h",
+		"1d": "1d",
+		"2d": "2d",
+		"7d": "7d",
+	};
+	return map[pageWindow] ?? "24h";
+}
 
 type ProviderSortBy =
 	| "name"
@@ -40,19 +58,19 @@ function SortableHeader({
 	sortKey,
 	currentSortBy,
 	currentSortOrder,
-	range,
+	pageWindow,
 }: {
 	label: string;
 	sortKey: ProviderSortBy;
 	currentSortBy: ProviderSortBy;
 	currentSortOrder: SortOrder;
-	range: TimeseriesRange;
+	pageWindow?: PageWindow;
 }) {
 	const isActive = currentSortBy === sortKey;
 	const nextOrder = isActive && currentSortOrder === "asc" ? "desc" : "asc";
 
-	const rangeParam = range !== "all" ? `&range=${range}` : "";
-	const href = `/providers?sortBy=${sortKey}&sortOrder=${nextOrder}${rangeParam}`;
+	const windowParam = pageWindow ? `&window=${pageWindow}` : "";
+	const href = `/providers?sortBy=${sortKey}&sortOrder=${nextOrder}${windowParam}`;
 
 	return (
 		<Link
@@ -90,7 +108,13 @@ function formatDate(dateString: string) {
 	});
 }
 
-function ProviderRow({ provider }: { provider: ProviderStats }) {
+function ProviderRow({
+	provider,
+	externalWindow,
+}: {
+	provider: ProviderStats;
+	externalWindow?: HistoryWindow;
+}) {
 	const [expanded, setExpanded] = useState(false);
 	const errorRate =
 		provider.logsCount > 0
@@ -168,6 +192,7 @@ function ProviderRow({ provider }: { provider: ProviderStats }) {
 							title={`${provider.name} — History`}
 							description="Request volume, errors, latency, and tokens over time"
 							fetchData={fetchData}
+							externalWindow={externalWindow}
 						/>
 					</TableCell>
 				</TableRow>
@@ -180,13 +205,15 @@ export function ProvidersTable({
 	providers,
 	sortBy = "logsCount",
 	sortOrder = "desc",
-	range = "all",
+	pageWindow,
 }: {
 	providers: ProviderStats[];
 	sortBy?: ProviderSortBy;
 	sortOrder?: SortOrder;
-	range?: TimeseriesRange;
+	pageWindow?: PageWindow;
 }) {
+	const externalWindow = pageWindow ? toHistoryWindow(pageWindow) : undefined;
+
 	const sh = (label: string, sortKey: ProviderSortBy) => (
 		<TableHead>
 			<SortableHeader
@@ -194,7 +221,7 @@ export function ProvidersTable({
 				sortKey={sortKey}
 				currentSortBy={sortBy}
 				currentSortOrder={sortOrder}
-				range={range}
+				pageWindow={pageWindow}
 			/>
 		</TableHead>
 	);
@@ -226,7 +253,13 @@ export function ProvidersTable({
 						</TableCell>
 					</TableRow>
 				) : (
-					providers.map((p) => <ProviderRow key={p.id} provider={p} />)
+					providers.map((p) => (
+						<ProviderRow
+							key={p.id}
+							provider={p}
+							externalWindow={externalWindow}
+						/>
+					))
 				)}
 			</TableBody>
 		</Table>

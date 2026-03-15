@@ -1115,6 +1115,8 @@ export interface paths {
             parameters: {
                 query?: {
                     range?: "7d" | "30d" | "90d" | "365d" | "all";
+                    from?: string;
+                    to?: string;
                 };
                 header?: never;
                 path?: never;
@@ -1163,6 +1165,8 @@ export interface paths {
             parameters: {
                 query?: {
                     range?: "7d" | "30d" | "90d" | "365d" | "all";
+                    from?: string;
+                    to?: string;
                 };
                 header?: never;
                 path?: never;
@@ -1704,16 +1708,24 @@ export interface paths {
                                 usedProvider: string;
                                 usedModelMapping: string | null;
                                 requestId: string | null;
+                                projectId: string;
+                                organizationId: string;
+                                apiKeyId: string;
                                 promptTokens: string | null;
                                 completionTokens: string | null;
                                 totalTokens: string | null;
                                 reasoningTokens: string | null;
                                 cachedTokens: string | null;
+                                imageInputTokens: string | null;
+                                imageOutputTokens: string | null;
                                 cost: number | null;
                                 inputCost: number | null;
                                 outputCost: number | null;
                                 cachedInputCost: number | null;
                                 requestCost: number | null;
+                                webSearchCost: number | null;
+                                imageInputCost: number | null;
+                                imageOutputCost: number | null;
                                 dataStorageCost: number | null;
                                 hasError: boolean | null;
                                 errorDetails?: unknown;
@@ -1721,12 +1733,35 @@ export interface paths {
                                 unifiedFinishReason: string | null;
                                 cached: boolean | null;
                                 streamed: boolean | null;
+                                canceled: boolean | null;
+                                retried: boolean | null;
+                                retriedByLogId: string | null;
                                 source: string | null;
                                 content: string | null;
+                                reasoningContent: string | null;
+                                mode: string;
                                 usedMode: string;
                                 discount: number | null;
+                                pricingTier: string | null;
                                 timeToFirstToken: number | null;
+                                timeToFirstReasoningToken: number | null;
                                 responseSize: number | null;
+                                temperature: number | null;
+                                maxTokens: number | null;
+                                topP: number | null;
+                                frequencyPenalty: number | null;
+                                reasoningEffort: string | null;
+                                reasoningMaxTokens: number | null;
+                                effort: string | null;
+                                responseFormat?: unknown;
+                                tools?: unknown;
+                                toolChoice?: unknown;
+                                toolResults?: unknown;
+                                messages?: unknown;
+                                params?: unknown;
+                                plugins: string[] | null;
+                                pluginResults?: unknown;
+                                customHeaders?: unknown;
                                 routingMetadata?: unknown;
                             }[];
                             pagination: {
@@ -2128,6 +2163,8 @@ export interface paths {
                 query?: {
                     sortBy?: "name" | "status" | "logsCount" | "errorsCount" | "cachedCount" | "avgTimeToFirstToken" | "modelCount" | "updatedAt";
                     sortOrder?: "asc" | "desc";
+                    from?: string;
+                    to?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2152,9 +2189,13 @@ export interface paths {
                                 cachedCount: number;
                                 avgTimeToFirstToken: number | null;
                                 modelCount: number;
+                                totalTokens: number;
+                                totalCost: number;
                                 updatedAt: string;
                             }[];
                             total: number;
+                            totalTokens: number;
+                            totalCost: number;
                         };
                     };
                 };
@@ -2184,6 +2225,8 @@ export interface paths {
                     sortOrder?: "asc" | "desc";
                     limit?: number;
                     offset?: number | null;
+                    from?: string;
+                    to?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2210,11 +2253,15 @@ export interface paths {
                                 cachedCount: number;
                                 avgTimeToFirstToken: number | null;
                                 providerCount: number;
+                                totalTokens: number;
+                                totalCost: number;
                                 updatedAt: string;
                             }[];
                             total: number;
                             limit: number;
                             offset: number;
+                            totalTokens: number;
+                            totalCost: number;
                         };
                     };
                 };
@@ -2403,7 +2450,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    window?: "1m" | "2m" | "5m" | "30m" | "1h" | "2h" | "4h" | "24h";
+                    window?: "2m" | "5m" | "15m" | "1h" | "2h" | "4h" | "12h" | "24h" | "1d" | "2d" | "7d";
                 };
                 header?: never;
                 path: {
@@ -2428,6 +2475,7 @@ export interface paths {
                                 avgTtft: number | null;
                                 avgDuration: number | null;
                                 totalTokens: number;
+                                totalCost: number;
                             }[];
                         };
                     };
@@ -2452,7 +2500,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    window?: "1m" | "2m" | "5m" | "30m" | "1h" | "2h" | "4h" | "24h";
+                    window?: "2m" | "5m" | "15m" | "1h" | "2h" | "4h" | "12h" | "24h" | "1d" | "2d" | "7d";
                 };
                 header?: never;
                 path: {
@@ -2477,6 +2525,7 @@ export interface paths {
                                 avgTtft: number | null;
                                 avgDuration: number | null;
                                 totalTokens: number;
+                                totalCost: number;
                             }[];
                         };
                     };
@@ -2501,7 +2550,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    window?: "1m" | "2m" | "5m" | "30m" | "1h" | "2h" | "4h" | "24h";
+                    window?: "2m" | "5m" | "15m" | "1h" | "2h" | "4h" | "12h" | "24h" | "1d" | "2d" | "7d";
                 };
                 header?: never;
                 path: {
@@ -2527,6 +2576,7 @@ export interface paths {
                                 avgTtft: number | null;
                                 avgDuration: number | null;
                                 totalTokens: number;
+                                totalCost: number;
                             }[];
                         };
                     };
@@ -2552,6 +2602,8 @@ export interface paths {
             parameters: {
                 query?: {
                     window?: "1h" | "4h" | "12h" | "1d" | "7d" | "30d" | "90d" | "365d";
+                    from?: string;
+                    to?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2635,6 +2687,65 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/model-provider-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    search?: string;
+                    sortBy?: "modelId" | "providerId" | "logsCount" | "errorsCount" | "avgTimeToFirstToken" | "updatedAt";
+                    sortOrder?: "asc" | "desc";
+                    limit?: number | null;
+                    offset?: number | null;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description List of all model-provider mappings. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            mappings: {
+                                id: string;
+                                modelId: string;
+                                modelName: string;
+                                providerId: string;
+                                providerName: string;
+                                status: string;
+                                logsCount: number;
+                                errorsCount: number;
+                                cachedCount: number;
+                                avgTimeToFirstToken: number | null;
+                                inputPrice: string | null;
+                                outputPrice: string | null;
+                                contextSize: number | null;
+                                updatedAt: string;
+                            }[];
+                            total: number;
+                        };
+                    };
                 };
             };
         };
