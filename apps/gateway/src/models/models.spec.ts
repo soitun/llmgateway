@@ -208,10 +208,23 @@ describe("Models API", () => {
 			expect(videoModel.architecture.input_modalities).toEqual(["text"]);
 			expect(videoModel.architecture.output_modalities).toEqual(["video"]);
 			expect(videoModel.pricing.per_second).toBeDefined();
-			expect(videoModel.providers[0].pricing.per_second).toBeDefined();
-			expect(videoModel.providers[0].supportedVideoSizes).toEqual([
+			const obsidianProvider = videoModel.providers.find(
+				(provider: any) => provider.providerId === "obsidian",
+			);
+			const avalancheProvider = videoModel.providers.find(
+				(provider: any) => provider.providerId === "avalanche",
+			);
+			expect(obsidianProvider?.pricing.per_second).toBeDefined();
+			expect(obsidianProvider?.supportedVideoSizes).toEqual([
 				"1280x720",
 				"720x1280",
+			]);
+			expect(avalancheProvider?.pricing.per_second).toBeDefined();
+			expect(avalancheProvider?.supportedVideoSizes).toEqual([
+				"1920x1080",
+				"1080x1920",
+				"3840x2160",
+				"2160x3840",
 			]);
 		}
 	});

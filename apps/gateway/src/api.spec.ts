@@ -233,6 +233,59 @@ describe("test", () => {
 		).toBe("720x1280");
 	});
 
+	test("/v1/videos routes 1080p sizes to avalanche", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values([
+			{
+				id: "provider-key-obsidian",
+				token: "sk-obsidian-key",
+				provider: "obsidian",
+				organizationId: "org-id",
+				baseUrl: mockServerUrl,
+			},
+			{
+				id: "provider-key-avalanche",
+				token: "sk-avalanche-key",
+				provider: "avalanche",
+				organizationId: "org-id",
+				baseUrl: `${mockServerUrl}/api/v1/veo`,
+			},
+		]);
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1-generate-preview",
+				prompt: "A motorcycle driving through Tokyo at night",
+				size: "1920x1080",
+			}),
+		});
+
+		expect(res.status).toBe(200);
+
+		const json = await res.json();
+		const videoJob = await db.query.videoJob.findFirst({
+			where: { id: { eq: json.id } },
+		});
+		expect(videoJob?.usedProvider).toBe("avalanche");
+		expect(videoJob?.usedModel).toBe("veo3");
+		expect(videoJob?.upstreamId).toBe("avalanche_task_1");
+		expect(
+			(videoJob?.upstreamCreateResponse as { size?: string } | null)?.size,
+		).toBe("1920x1080");
+	});
+
 	test("/v1/videos supports retrieve and content for completed jobs", async () => {
 		await db.insert(tables.apiKey).values({
 			id: "token-id",
@@ -299,6 +352,78 @@ describe("test", () => {
 		expect(logs[0].requestCost).toBe(0);
 		expect(logs[0].videoOutputCost).toBe(3.2);
 		expect(logs[0].cost).toBe(3.2);
+	});
+
+	test("/v1/videos supports completed 4k avalanche jobs", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "avalanche",
+			organizationId: "org-id",
+			baseUrl: `${mockServerUrl}/api/v1/veo`,
+		});
+
+		const createRes = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "avalanche/veo-3.1-fast-generate-preview",
+				prompt: "A storm above a mountain range",
+				size: "3840x2160",
+			}),
+		});
+
+		expect(createRes.status).toBe(200);
+		const created = await createRes.json();
+
+		const videoJob = await db.query.videoJob.findFirst({
+			where: { id: { eq: created.id } },
+		});
+		expect(videoJob).toBeTruthy();
+		expect(videoJob?.usedProvider).toBe("avalanche");
+
+		setMockVideoStatus(videoJob!.upstreamId, "completed");
+		await processPendingVideoJobs();
+
+		const getRes = await app.request(`/v1/videos/${created.id}`, {
+			headers: {
+				Authorization: "Bearer real-token",
+			},
+		});
+		expect(getRes.status).toBe(200);
+		const jobJson = await getRes.json();
+		expect(jobJson.status).toBe("completed");
+		expect(jobJson.content[0].url).toContain("-4k");
+
+		const contentRes = await app.request(`/v1/videos/${created.id}/content`, {
+			headers: {
+				Authorization: "Bearer real-token",
+			},
+		});
+		expect(contentRes.status).toBe(200);
+		expect(contentRes.headers.get("content-type")).toContain("video/mp4");
+		expect(await contentRes.text()).toBe(
+			`mock-video-${videoJob!.upstreamId}-4k`,
+		);
+
+		const logs = await db.query.log.findMany({
+			where: { usedModel: { eq: "veo3_fast" } },
+		});
+		expect(logs).toHaveLength(1);
+		expect(logs[0].requestCost).toBe(0);
+		expect(logs[0].videoOutputCost).toBe(2.8);
+		expect(logs[0].cost).toBe(2.8);
 	});
 
 	test("/v1/videos delivers signed callbacks after completion", async () => {

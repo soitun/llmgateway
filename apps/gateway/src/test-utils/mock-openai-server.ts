@@ -446,6 +446,53 @@ mockOpenAIServer.post("/v1/videos", async (c) => {
 	return c.json(job);
 });
 
+mockOpenAIServer.post("/api/v1/veo/generate", async (c) => {
+	const body = await c.req.json();
+	videoCounter++;
+	const id = `avalanche_task_${videoCounter}`;
+	const videoSize =
+		body.aspect_ratio === "9:16"
+			? {
+					size: "1080x1920",
+					resolution: "720p",
+					width: 1080,
+					height: 1920,
+				}
+			: {
+					size: "1920x1080",
+					resolution: "720p",
+					width: 1920,
+					height: 1080,
+				};
+
+	const job: MockVideoJobState = {
+		id,
+		object: "video",
+		model: body.model ?? "veo3",
+		status: "queued",
+		progress: 0,
+		size: videoSize.size,
+		duration: 8,
+		resolution: videoSize.resolution,
+		width: videoSize.width,
+		height: videoSize.height,
+		created_at: Math.floor(Date.now() / 1000),
+		completed_at: null,
+		expires_at: null,
+		error: null,
+	};
+
+	videoJobs.set(id, job);
+
+	return c.json({
+		code: 200,
+		msg: "success",
+		data: {
+			taskId: id,
+		},
+	});
+});
+
 mockOpenAIServer.get("/v1/videos/:id", async (c) => {
 	const id = c.req.param("id");
 	const job = videoJobs.get(id);
@@ -485,6 +532,123 @@ mockOpenAIServer.get("/v1/videos/:id/content", async (c) => {
 		resolution: job.resolution,
 		width: job.width,
 		height: job.height,
+	});
+});
+
+mockOpenAIServer.get("/api/v1/veo/record-info", async (c) => {
+	const taskId = c.req.query("taskId");
+	if (!taskId) {
+		c.status(400);
+		return c.json({
+			code: 400,
+			msg: "taskId is required",
+		});
+	}
+
+	const job = videoJobs.get(taskId);
+	if (!job) {
+		c.status(404);
+		return c.json({
+			code: 404,
+			msg: "task not found",
+		});
+	}
+
+	const successFlag =
+		job.status === "completed" ? 1 : job.status === "failed" ? -1 : 0;
+
+	return c.json({
+		code: 200,
+		msg: "success",
+		data: {
+			taskId,
+			successFlag,
+			createTime: job.created_at,
+			completeTime: job.completed_at,
+			response: {
+				resultUrls:
+					job.status === "completed"
+						? [`${currentMockServerUrl}/mock-assets/${taskId}`]
+						: [],
+				resolution: job.resolution ?? "720p",
+			},
+		},
+	});
+});
+
+mockOpenAIServer.get("/api/v1/veo/get-1080p-video", async (c) => {
+	const taskId = c.req.query("taskId");
+	if (!taskId) {
+		c.status(400);
+		return c.json({
+			code: 400,
+			msg: "taskId is required",
+		});
+	}
+
+	const job = videoJobs.get(taskId);
+	if (!job) {
+		c.status(404);
+		return c.json({
+			code: 404,
+			msg: "task not found",
+		});
+	}
+
+	if (job.status !== "completed") {
+		c.status(422);
+		return c.json({
+			code: 422,
+			msg: "video is still processing",
+		});
+	}
+
+	return c.json({
+		code: 200,
+		msg: "success",
+		data: {
+			taskId,
+			resultUrl: `${currentMockServerUrl}/mock-assets/${taskId}-1080p`,
+		},
+	});
+});
+
+mockOpenAIServer.post("/api/v1/veo/get-4k-video", async (c) => {
+	const body = await c.req.json();
+	const taskId = body.taskId;
+
+	if (typeof taskId !== "string" || taskId.length === 0) {
+		c.status(400);
+		return c.json({
+			code: 400,
+			msg: "taskId is required",
+		});
+	}
+
+	const job = videoJobs.get(taskId);
+	if (!job) {
+		c.status(404);
+		return c.json({
+			code: 404,
+			msg: "task not found",
+		});
+	}
+
+	if (job.status !== "completed") {
+		c.status(422);
+		return c.json({
+			code: 422,
+			msg: "video is still processing",
+		});
+	}
+
+	return c.json({
+		code: 200,
+		msg: "success",
+		data: {
+			taskId: `${taskId}_4k`,
+			resultUrls: [`${currentMockServerUrl}/mock-assets/${taskId}-4k`],
+		},
 	});
 });
 

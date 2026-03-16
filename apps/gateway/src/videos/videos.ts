@@ -25,6 +25,7 @@ import {
 	hasProviderEnvironmentToken,
 	models,
 	type ModelDefinition,
+	type Provider,
 	type ProviderModelMapping,
 } from "@llmgateway/models";
 
@@ -92,7 +93,7 @@ const createVideoRequestSchema = z
 	.object({
 		model: z.string().default("veo-3.1-generate-preview").openapi({
 			description:
-				"The video generation model to use. Supported values: veo-3.1-generate-preview, veo-3.1-fast-generate-preview, obsidian/veo-3.1-generate-preview, or obsidian/veo-3.1-fast-generate-preview.",
+				"The video generation model to use. Supported values: veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/ or avalanche/ prefixed variants.",
 			example: "veo-3.1-generate-preview",
 		}),
 		prompt: z.string().min(1).openapi({
@@ -102,7 +103,7 @@ const createVideoRequestSchema = z
 		}),
 		size: z.string().optional().openapi({
 			description:
-				"Output resolution in OpenAI widthxheight format. Veo 3.1 accepts Google-style widthxheight sizes, but provider support can be narrower. Obsidian currently supports 1280x720 and 720x1280 only.",
+				"Output resolution in OpenAI widthxheight format. Obsidian supports 1280x720 and 720x1280. Avalanche supports 1920x1080, 1080x1920, 3840x2160, and 2160x3840.",
 			example: "1280x720",
 		}),
 		callback_url: z.string().url().optional().openapi({
@@ -301,9 +302,16 @@ interface RequestContext {
 }
 
 interface ProviderContext {
+	providerId: Provider;
 	baseUrl: string;
 	token: string;
 	usedMode: "api-keys" | "credits";
+}
+
+interface ResolvedVideoExecution {
+	providerMapping: ProviderModelMapping;
+	providerContext: ProviderContext;
+	upstreamModelName: string;
 }
 
 function getAvailableCredits(
@@ -400,19 +408,21 @@ function getVideoModel(model: string): {
 		};
 	}
 
-	if (model.startsWith("obsidian/")) {
-		const normalizedModel = model.slice("obsidian/".length);
-		if (supportedModels.has(normalizedModel)) {
-			return {
-				normalizedModel,
-				requestedProvider: "obsidian",
-			};
+	for (const providerId of ["obsidian", "avalanche"] as const) {
+		if (model.startsWith(`${providerId}/`)) {
+			const normalizedModel = model.slice(`${providerId}/`.length);
+			if (supportedModels.has(normalizedModel)) {
+				return {
+					normalizedModel,
+					requestedProvider: providerId,
+				};
+			}
 		}
 	}
 
 	throw new HTTPException(400, {
 		message:
-			"Unsupported video model. Only veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/ prefixed variants are supported right now.",
+			"Unsupported video model. Only veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/ or avalanche/ prefixed variants are supported right now.",
 	});
 }
 
@@ -421,11 +431,11 @@ function getVideoSizeConfig(size: string | undefined): VideoSizeConfig {
 	return SUPPORTED_VEO_VIDEO_SIZES[normalizedSize as SupportedVeoVideoSize];
 }
 
-function getVideoProviderMapping(
+function getEligibleVideoProviderMappings(
 	modelInfo: ModelDefinition,
 	requestedProvider: string | undefined,
 	videoSize: VideoSizeConfig,
-): ProviderModelMapping {
+): ProviderModelMapping[] {
 	const candidateProviders = modelInfo.providers.filter((provider) => {
 		if (!provider.videoGenerations) {
 			return false;
@@ -456,16 +466,7 @@ function getVideoProviderMapping(
 		});
 	}
 
-	const providerMapping = matchingProviders.find(
-		(provider) => provider.providerId === "obsidian",
-	);
-	if (!providerMapping) {
-		throw new HTTPException(500, {
-			message: `No supported provider mapping available for model ${modelInfo.id}`,
-		});
-	}
-
-	return providerMapping;
+	return matchingProviders;
 }
 
 function getObsidianVideoModelName(
@@ -477,6 +478,29 @@ function getObsidianVideoModelName(
 	}
 
 	return baseModelName;
+}
+
+function getAvalancheVideoModelName(baseModelName: string): string {
+	return baseModelName;
+}
+
+function getVideoUpstreamModelName(
+	providerId: Provider,
+	baseModelName: string,
+	videoSize: VideoSizeConfig,
+): string {
+	switch (providerId) {
+		case "obsidian":
+			return getObsidianVideoModelName(baseModelName, videoSize);
+		case "avalanche":
+			return getAvalancheVideoModelName(baseModelName);
+		default:
+			return baseModelName;
+	}
+}
+
+function getAvalancheAspectRatio(videoSize: VideoSizeConfig): "16:9" | "9:16" {
+	return videoSize.orientation === "portrait" ? "9:16" : "16:9";
 }
 
 function addRequestedVideoMetadata(
@@ -505,27 +529,28 @@ function addRequestedVideoMetadata(
 }
 
 async function resolveProviderContext(
+	providerId: Provider,
 	project: InferSelectModel<typeof tables.project>,
 	organizationId: string,
 ): Promise<ProviderContext> {
 	if (project.mode === "api-keys") {
-		const providerKey = await findProviderKey(organizationId, "obsidian");
+		const providerKey = await findProviderKey(organizationId, providerId);
 		if (!providerKey) {
 			throw new HTTPException(400, {
-				message:
-					"No API key set for provider: obsidian. Please add a provider key in your settings or add credits and switch to credits or hybrid mode.",
+				message: `No API key set for provider: ${providerId}. Please add a provider key in your settings or add credits and switch to credits or hybrid mode.`,
 			});
 		}
 
 		const baseUrl =
-			providerKey.baseUrl ?? getProviderEnvValue("obsidian", "baseUrl");
+			providerKey.baseUrl ?? getProviderEnvValue(providerId, "baseUrl");
 		if (!baseUrl) {
 			throw new HTTPException(400, {
-				message: "No base URL set for provider: obsidian",
+				message: `No base URL set for provider: ${providerId}`,
 			});
 		}
 
 		return {
+			providerId,
 			baseUrl,
 			token: providerKey.token,
 			usedMode: "api-keys",
@@ -533,60 +558,171 @@ async function resolveProviderContext(
 	}
 
 	if (project.mode === "credits") {
-		const env = getProviderEnv("obsidian");
-		const baseUrl = getProviderEnvValue("obsidian", "baseUrl", env.configIndex);
+		const env = getProviderEnv(providerId);
+		const baseUrl = getProviderEnvValue(providerId, "baseUrl", env.configIndex);
 		if (!baseUrl) {
 			throw new HTTPException(500, {
-				message:
-					"LLM_OBSIDIAN_BASE_URL environment variable is required for obsidian provider",
+				message: `Base URL environment variable is required for ${providerId} provider`,
 			});
 		}
 
 		return {
+			providerId,
 			baseUrl,
 			token: env.token,
 			usedMode: "credits",
 		};
 	}
 
-	const providerKey = await findProviderKey(organizationId, "obsidian");
+	const providerKey = await findProviderKey(organizationId, providerId);
 	if (providerKey) {
 		const baseUrl =
-			providerKey.baseUrl ?? getProviderEnvValue("obsidian", "baseUrl");
+			providerKey.baseUrl ?? getProviderEnvValue(providerId, "baseUrl");
 		if (!baseUrl) {
 			throw new HTTPException(400, {
-				message: "No base URL set for provider: obsidian",
+				message: `No base URL set for provider: ${providerId}`,
 			});
 		}
 
 		return {
+			providerId,
 			baseUrl,
 			token: providerKey.token,
 			usedMode: "api-keys",
 		};
 	}
 
-	if (!hasProviderEnvironmentToken("obsidian")) {
+	if (!hasProviderEnvironmentToken(providerId)) {
 		throw new HTTPException(400, {
-			message:
-				"No provider key set for any of the providers that support the requested Veo 3.1 model. Please add the provider key in the settings or switch the project mode to credits or hybrid.",
+			message: `No provider key or environment token set for provider: ${providerId}. Please add the provider key in the settings or switch the project mode to credits or hybrid.`,
 		});
 	}
 
-	const env = getProviderEnv("obsidian");
-	const baseUrl = getProviderEnvValue("obsidian", "baseUrl", env.configIndex);
+	const env = getProviderEnv(providerId);
+	const baseUrl = getProviderEnvValue(providerId, "baseUrl", env.configIndex);
 	if (!baseUrl) {
 		throw new HTTPException(500, {
-			message:
-				"LLM_OBSIDIAN_BASE_URL environment variable is required for obsidian provider",
+			message: `Base URL environment variable is required for ${providerId} provider`,
 		});
 	}
 
 	return {
+		providerId,
 		baseUrl,
 		token: env.token,
 		usedMode: "credits",
 	};
+}
+
+async function hasVideoProviderConfiguration(
+	providerId: Provider,
+	project: InferSelectModel<typeof tables.project>,
+	organizationId: string,
+): Promise<boolean> {
+	if (project.mode === "api-keys") {
+		const providerKey = await findProviderKey(organizationId, providerId);
+		return Boolean(
+			providerKey &&
+				(providerKey.baseUrl ?? getProviderEnvValue(providerId, "baseUrl")),
+		);
+	}
+
+	if (project.mode === "credits") {
+		return Boolean(
+			hasProviderEnvironmentToken(providerId) &&
+				getProviderEnvValue(
+					providerId,
+					"baseUrl",
+					getProviderEnv(providerId).configIndex,
+				),
+		);
+	}
+
+	const providerKey = await findProviderKey(organizationId, providerId);
+	if (providerKey) {
+		return Boolean(
+			providerKey.baseUrl ?? getProviderEnvValue(providerId, "baseUrl"),
+		);
+	}
+
+	return Boolean(
+		hasProviderEnvironmentToken(providerId) &&
+			getProviderEnvValue(
+				providerId,
+				"baseUrl",
+				getProviderEnv(providerId).configIndex,
+			),
+	);
+}
+
+async function resolveVideoExecution(
+	modelInfo: ModelDefinition,
+	requestedProvider: string | undefined,
+	videoSize: VideoSizeConfig,
+	project: InferSelectModel<typeof tables.project>,
+	organizationId: string,
+): Promise<ResolvedVideoExecution> {
+	const eligibleMappings = getEligibleVideoProviderMappings(
+		modelInfo,
+		requestedProvider,
+		videoSize,
+	);
+	const errors: string[] = [];
+
+	for (const providerMapping of eligibleMappings) {
+		try {
+			const providerContext = await resolveProviderContext(
+				providerMapping.providerId as Provider,
+				project,
+				organizationId,
+			);
+			return {
+				providerMapping,
+				providerContext,
+				upstreamModelName: getVideoUpstreamModelName(
+					providerMapping.providerId as Provider,
+					providerMapping.modelName,
+					videoSize,
+				),
+			};
+		} catch (error) {
+			errors.push(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	if (!requestedProvider) {
+		const configuredProviders: Provider[] = [];
+		for (const providerMapping of modelInfo.providers) {
+			const providerId = providerMapping.providerId as Provider;
+			if (
+				providerMapping.videoGenerations &&
+				(await hasVideoProviderConfiguration(
+					providerId,
+					project,
+					organizationId,
+				))
+			) {
+				configuredProviders.push(providerId);
+			}
+		}
+
+		if (configuredProviders.length > 0) {
+			const configuredEligibleMappings = eligibleMappings.filter((provider) =>
+				configuredProviders.includes(provider.providerId as Provider),
+			);
+			if (configuredEligibleMappings.length === 0) {
+				throw new HTTPException(400, {
+					message: `Requested size ${videoSize.size} is not supported by the configured providers for model ${modelInfo.id}. Configured providers: ${configuredProviders.join(", ")}.`,
+				});
+			}
+		}
+	}
+
+	throw new HTTPException(400, {
+		message:
+			errors[0] ??
+			`No configured provider is available for model ${modelInfo.id} and size ${videoSize.size}.`,
+	});
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -867,6 +1003,140 @@ async function fetchUpstreamJson(
 	return body;
 }
 
+function extractUpstreamVideoId(body: Record<string, unknown>): string | null {
+	const data =
+		body.data && typeof body.data === "object"
+			? (body.data as Record<string, unknown>)
+			: null;
+
+	for (const value of [
+		body.id,
+		body.video_id,
+		body.job_id,
+		body.taskId,
+		data?.taskId,
+		data?.id,
+	]) {
+		if (typeof value === "string" && value.length > 0) {
+			return value;
+		}
+	}
+
+	return null;
+}
+
+async function createObsidianVideoJob(
+	providerContext: ProviderContext,
+	providerMapping: ProviderModelMapping,
+	videoSize: VideoSizeConfig,
+	prompt: string,
+): Promise<{ upstreamId: string; upstreamResponse: Record<string, unknown> }> {
+	const upstreamUrl = joinUrl(providerContext.baseUrl, "/v1/videos");
+	const upstreamModelName = getVideoUpstreamModelName(
+		"obsidian",
+		providerMapping.modelName,
+		videoSize,
+	);
+	const upstreamRequest = {
+		model: upstreamModelName,
+		prompt,
+		size: videoSize.size,
+	};
+	const upstreamResponse = addRequestedVideoMetadata(
+		await fetchUpstreamJson(upstreamUrl, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				...getProviderHeaders("obsidian", providerContext.token),
+			},
+			body: JSON.stringify(upstreamRequest),
+		}),
+		videoSize,
+	);
+	const upstreamId = extractUpstreamVideoId(upstreamResponse);
+	if (!upstreamId) {
+		throw new HTTPException(502, {
+			message: "Upstream video response did not include an id",
+		});
+	}
+
+	return { upstreamId, upstreamResponse };
+}
+
+async function createAvalancheVideoJob(
+	providerContext: ProviderContext,
+	providerMapping: ProviderModelMapping,
+	videoSize: VideoSizeConfig,
+	prompt: string,
+): Promise<{ upstreamId: string; upstreamResponse: Record<string, unknown> }> {
+	const upstreamUrl = joinUrl(providerContext.baseUrl, "/generate");
+	const upstreamModelName = getVideoUpstreamModelName(
+		"avalanche",
+		providerMapping.modelName,
+		videoSize,
+	);
+	const upstreamRequest = {
+		prompt,
+		model: upstreamModelName,
+		aspect_ratio: getAvalancheAspectRatio(videoSize),
+		generationType: "TEXT_2_VIDEO",
+		enableFallback: false,
+	};
+	const rawResponse = await fetchUpstreamJson(upstreamUrl, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			...getProviderHeaders("avalanche", providerContext.token),
+		},
+		body: JSON.stringify(upstreamRequest),
+	});
+	const upstreamResponse = addRequestedVideoMetadata(
+		{
+			...rawResponse,
+			status: "queued",
+			duration: 8,
+			aspect_ratio: upstreamRequest.aspect_ratio,
+		},
+		videoSize,
+	);
+	const upstreamId = extractUpstreamVideoId(upstreamResponse);
+	if (!upstreamId) {
+		throw new HTTPException(502, {
+			message: "Avalanche video response did not include a task id",
+		});
+	}
+
+	return { upstreamId, upstreamResponse };
+}
+
+async function createUpstreamVideoJob(
+	providerContext: ProviderContext,
+	providerMapping: ProviderModelMapping,
+	videoSize: VideoSizeConfig,
+	prompt: string,
+): Promise<{ upstreamId: string; upstreamResponse: Record<string, unknown> }> {
+	switch (providerContext.providerId) {
+		case "obsidian":
+			return await createObsidianVideoJob(
+				providerContext,
+				providerMapping,
+				videoSize,
+				prompt,
+			);
+		case "avalanche":
+			return await createAvalancheVideoJob(
+				providerContext,
+				providerMapping,
+				videoSize,
+				prompt,
+			);
+		default:
+			throw new HTTPException(500, {
+				message: `Unsupported video provider: ${providerContext.providerId}`,
+			});
+	}
+}
+
 export const videos = new OpenAPIHono<ServerTypes>();
 
 videos.openapi(createVideo, async (c) => {
@@ -903,57 +1173,20 @@ videos.openapi(createVideo, async (c) => {
 		});
 	}
 
-	const providerMapping = getVideoProviderMapping(
-		modelInfo,
-		requestedProvider,
+	const { providerMapping, providerContext, upstreamModelName } =
+		await resolveVideoExecution(
+			modelInfo,
+			requestedProvider,
+			videoSize,
+			project,
+			organization.id,
+		);
+	const { upstreamId, upstreamResponse } = await createUpstreamVideoJob(
+		providerContext,
+		providerMapping,
 		videoSize,
+		request.prompt,
 	);
-
-	const providerContext = await resolveProviderContext(
-		project,
-		organization.id,
-	);
-	const upstreamUrl = joinUrl(providerContext.baseUrl, "/v1/videos");
-	const upstreamModelName = getObsidianVideoModelName(
-		providerMapping.modelName,
-		videoSize,
-	);
-	const upstreamRequest = {
-		model: upstreamModelName,
-		prompt: request.prompt,
-		size: videoSize.size,
-	};
-
-	const upstreamResponse = addRequestedVideoMetadata(
-		await fetchUpstreamJson(upstreamUrl, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				...getProviderHeaders("obsidian", providerContext.token),
-			},
-			body: JSON.stringify(upstreamRequest),
-		}),
-		videoSize,
-	);
-
-	const upstreamId = (() => {
-		for (const value of [
-			upstreamResponse.id,
-			upstreamResponse.video_id,
-			upstreamResponse.job_id,
-		]) {
-			if (typeof value === "string" && value.length > 0) {
-				return value;
-			}
-		}
-		return null;
-	})();
-
-	if (!upstreamId) {
-		throw new HTTPException(502, {
-			message: "Upstream video response did not include an id",
-		});
-	}
 
 	const initialStatus = normalizeVideoStatus(upstreamResponse.status);
 	const created = await db
@@ -967,7 +1200,7 @@ videos.openapi(createVideo, async (c) => {
 			usedMode: providerContext.usedMode,
 			model: normalizedModel,
 			requestedProvider: requestedProvider ?? null,
-			usedProvider: "obsidian",
+			usedProvider: providerContext.providerId,
 			usedModel: upstreamModelName,
 			providerToken: providerContext.token,
 			providerBaseUrl: providerContext.baseUrl,
@@ -1001,7 +1234,7 @@ videos.openapi(createVideo, async (c) => {
 		projectId: project.id,
 		organizationId: organization.id,
 		model: normalizedModel,
-		usedProvider: "obsidian",
+		usedProvider: providerContext.providerId,
 	});
 
 	return c.json(serializeVideoJob(created));

@@ -134,6 +134,22 @@ export const providers = [
 		announcement: null,
 	},
 	{
+		id: "avalanche",
+		name: "Avalanche",
+		description: "Avalanche - KIE-based video generation provider.",
+		env: {
+			required: {
+				apiKey: "LLM_AVALANCHE_API_KEY",
+				baseUrl: "LLM_AVALANCHE_BASE_URL",
+			},
+		},
+		streaming: false,
+		cancellation: false,
+		color: "#0f766e",
+		website: null,
+		announcement: null,
+	},
+	{
 		id: "groq",
 		name: "Groq",
 		description: "Groq's ultra-fast LPU inference with various models",
