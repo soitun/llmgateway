@@ -4,11 +4,19 @@ description: Generate videos with an OpenAI-compatible async API and signed comp
 icon: Video
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
+
 # Video Generation
 
 LLMGateway supports asynchronous video generation through an OpenAI-compatible `POST /v1/videos` flow.
 
-The first supported model is `veo-3.1` on the `obsidian` provider.
+The first supported models are Google Veo 3.1 preview variants on the `obsidian` provider.
+
+You can find the current list of video-capable models on our [models page with the video filter enabled](https://llmgateway.io/models?filters=1&videoGeneration=true) or programmatically through the [/v1/models endpoint](/v1_models).
+
+<Callout type="success">
+	Video generation models are temporarily available at 60% off.
+</Callout>
 
 ## What Works Today
 
@@ -17,25 +25,18 @@ The first supported model is `veo-3.1` on the `obsidian` provider.
 - `GET /v1/videos/{video_id}/content`
 - Optional signed callbacks with `callback_url` and `callback_secret`
 
-## Supported Models
-
-- `veo-3.1`
-- `obsidian/veo-3.1`
-
-Both names resolve to the same upstream model. Use the provider-prefixed form if you want to pin the request explicitly to Obsidian.
-
 ## Request Format
 
-LLMGateway currently supports a focused subset of the OpenAI video API for `veo-3.1`.
+LLMGateway currently supports a focused subset of the OpenAI video API for Veo 3.1 preview models.
 
 ### Supported fields
 
-| Field             | Type   | Required | Description                                          |
-| ----------------- | ------ | -------- | ---------------------------------------------------- |
-| `model`           | string | yes      | `veo-3.1` or `obsidian/veo-3.1`                      |
-| `prompt`          | string | yes      | Text prompt for the video                            |
-| `callback_url`    | string | no       | LLMGateway extension for completion webhooks         |
-| `callback_secret` | string | no       | LLMGateway extension used to sign webhook deliveries |
+| Field             | Type   | Required | Description                                           |
+| ----------------- | ------ | -------- | ----------------------------------------------------- |
+| `model`           | string | yes      | Any video-capable model from the filtered models page |
+| `prompt`          | string | yes      | Text prompt for the video                             |
+| `callback_url`    | string | no       | LLMGateway extension for completion webhooks          |
+| `callback_secret` | string | no       | LLMGateway extension used to sign webhook deliveries  |
 
 ### Not supported yet
 
@@ -51,12 +52,19 @@ LLMGateway currently supports a focused subset of the OpenAI video API for `veo-
 
 Video generation requires at least `$1.00` in available organization credits before the job is submitted upstream.
 
+Current pricing follows Google’s official paid-tier Veo 3.1 pricing:
+
+| Model                           | Default price    | 4K price         |
+| ------------------------------- | ---------------- | ---------------- |
+| `veo-3.1-generate-preview`      | `$0.40 / second` | `$0.60 / second` |
+| `veo-3.1-fast-generate-preview` | `$0.15 / second` | `$0.35 / second` |
+
 ```bash
 curl -X POST "https://api.llmgateway.io/v1/videos" \
   -H "Authorization: Bearer $LLM_GATEWAY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "veo-3.1",
+    "model": "veo-3.1-generate-preview",
     "prompt": "A cinematic aerial shot flying above a rainforest waterfall at sunrise"
   }'
 ```
@@ -67,7 +75,7 @@ Example response:
 {
 	"id": "v_123",
 	"object": "video",
-	"model": "veo-3.1",
+	"model": "veo-3.1-generate-preview",
 	"status": "queued",
 	"progress": 0,
 	"created_at": 1773600000,
@@ -112,7 +120,7 @@ curl -X POST "https://api.llmgateway.io/v1/videos" \
   -H "Authorization: Bearer $LLM_GATEWAY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "veo-3.1",
+    "model": "veo-3.1-fast-generate-preview",
     "prompt": "A slow-motion close-up of waves crashing against black volcanic rock",
     "callback_url": "https://example.com/webhooks/video",
     "callback_secret": "whsec_your_secret_here"

@@ -39,10 +39,10 @@ const MIN_VIDEO_GENERATION_BALANCE = 1;
 
 const createVideoRequestSchema = z
 	.object({
-		model: z.string().default("veo-3.1").openapi({
+		model: z.string().default("veo-3.1-generate-preview").openapi({
 			description:
-				"The video generation model to use. Supported values: veo-3.1 or obsidian/veo-3.1.",
-			example: "veo-3.1",
+				"The video generation model to use. Supported values: veo-3.1-generate-preview, veo-3.1-fast-generate-preview, obsidian/veo-3.1-generate-preview, or obsidian/veo-3.1-fast-generate-preview.",
+			example: "veo-3.1-generate-preview",
 		}),
 		prompt: z.string().min(1).openapi({
 			description: "Text prompt describing the video to generate.",
@@ -81,7 +81,7 @@ const createVideoRequestSchema = z
 		if (value.n !== undefined && value.n !== 1) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
-				message: "Only n=1 is supported for veo-3.1",
+				message: "Only n=1 is supported for Veo 3.1 preview models",
 				path: ["n"],
 			});
 		}
@@ -95,7 +95,7 @@ const createVideoRequestSchema = z
 			if (value[key] !== undefined) {
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
-					message: `${key} is not supported for veo-3.1 yet`,
+					message: `${key} is not supported for Veo 3.1 preview models yet`,
 					path: [key],
 				});
 			}
@@ -326,23 +326,31 @@ function getVideoModel(model: string): {
 	normalizedModel: string;
 	requestedProvider: string | undefined;
 } {
-	if (model === "veo-3.1") {
+	const supportedModels = new Set([
+		"veo-3.1-generate-preview",
+		"veo-3.1-fast-generate-preview",
+	]);
+
+	if (supportedModels.has(model)) {
 		return {
-			normalizedModel: "veo-3.1",
+			normalizedModel: model,
 			requestedProvider: undefined,
 		};
 	}
 
-	if (model === "obsidian/veo-3.1") {
-		return {
-			normalizedModel: "veo-3.1",
-			requestedProvider: "obsidian",
-		};
+	if (model.startsWith("obsidian/")) {
+		const normalizedModel = model.slice("obsidian/".length);
+		if (supportedModels.has(normalizedModel)) {
+			return {
+				normalizedModel,
+				requestedProvider: "obsidian",
+			};
+		}
 	}
 
 	throw new HTTPException(400, {
 		message:
-			"Unsupported video model. Only veo-3.1 and obsidian/veo-3.1 are supported right now.",
+			"Unsupported video model. Only veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/ prefixed variants are supported right now.",
 	});
 }
 
@@ -411,7 +419,7 @@ async function resolveProviderContext(
 	if (!hasProviderEnvironmentToken("obsidian")) {
 		throw new HTTPException(400, {
 			message:
-				"No provider key set for any of the providers that support model veo-3.1. Please add the provider key in the settings or switch the project mode to credits or hybrid.",
+				"No provider key set for any of the providers that support the requested Veo 3.1 model. Please add the provider key in the settings or switch the project mode to credits or hybrid.",
 		});
 	}
 
@@ -744,13 +752,22 @@ videos.openapi(createVideo, async (c) => {
 		});
 	}
 
+	const providerMapping = modelInfo.providers.find(
+		(provider) => provider.providerId === "obsidian",
+	);
+	if (!providerMapping) {
+		throw new HTTPException(500, {
+			message: `No obsidian provider mapping available for model ${normalizedModel}`,
+		});
+	}
+
 	const providerContext = await resolveProviderContext(
 		project,
 		organization.id,
 	);
 	const upstreamUrl = joinUrl(providerContext.baseUrl, "/v1/videos");
 	const upstreamRequest = {
-		model: normalizedModel,
+		model: providerMapping.modelName,
 		prompt: request.prompt,
 	};
 
@@ -795,7 +812,7 @@ videos.openapi(createVideo, async (c) => {
 			model: normalizedModel,
 			requestedProvider: requestedProvider ?? null,
 			usedProvider: "obsidian",
-			usedModel: "veo-3.1",
+			usedModel: providerMapping.modelName,
 			providerToken: providerContext.token,
 			providerBaseUrl: providerContext.baseUrl,
 			upstreamId,

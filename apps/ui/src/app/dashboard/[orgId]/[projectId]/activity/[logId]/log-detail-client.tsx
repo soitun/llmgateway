@@ -555,6 +555,14 @@ export function LogDetailClient({
 													muted
 												/>
 											)}
+										{!!log.videoOutputCost &&
+											Number(log.videoOutputCost) > 0 && (
+												<Field
+													label="Video Output Cost"
+													value={`$${Number(log.videoOutputCost).toFixed(8)}`}
+													muted
+												/>
+											)}
 										<Field
 											label="Inference Total"
 											value={log.cost ? `$${log.cost.toFixed(8)}` : "$0"}

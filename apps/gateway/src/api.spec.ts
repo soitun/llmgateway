@@ -132,7 +132,7 @@ describe("test", () => {
 				Authorization: "Bearer real-token",
 			},
 			body: JSON.stringify({
-				model: "veo-3.1",
+				model: "veo-3.1-generate-preview",
 				prompt: "A robot dancing in the rain",
 			}),
 		});
@@ -141,7 +141,7 @@ describe("test", () => {
 
 		const json = await res.json();
 		expect(json.object).toBe("video");
-		expect(json.model).toBe("veo-3.1");
+		expect(json.model).toBe("veo-3.1-generate-preview");
 		expect(json.status).toBe("queued");
 
 		const videoJob = await db.query.videoJob.findFirst({
@@ -175,7 +175,7 @@ describe("test", () => {
 				Authorization: "Bearer real-token",
 			},
 			body: JSON.stringify({
-				model: "obsidian/veo-3.1",
+				model: "obsidian/veo-3.1-generate-preview",
 				prompt: "A cinematic sunset over mountains",
 			}),
 		});
@@ -214,8 +214,9 @@ describe("test", () => {
 			where: { usedModel: { eq: "veo-3.1" } },
 		});
 		expect(logs).toHaveLength(1);
-		expect(logs[0].requestCost).toBe(0.25);
-		expect(logs[0].cost).toBe(0.25);
+		expect(logs[0].requestCost).toBe(0);
+		expect(logs[0].videoOutputCost).toBe(3.2);
+		expect(logs[0].cost).toBe(3.2);
 	});
 
 	test("/v1/videos delivers signed callbacks after completion", async () => {
@@ -242,7 +243,7 @@ describe("test", () => {
 				Authorization: "Bearer real-token",
 			},
 			body: JSON.stringify({
-				model: "veo-3.1",
+				model: "veo-3.1-fast-generate-preview",
 				prompt: "A whale swimming through clouds",
 				callback_url: `${mockServerUrl}/mock-callback/video-job`,
 				callback_secret: "whsec_test",
@@ -260,6 +261,13 @@ describe("test", () => {
 		setMockVideoStatus(videoJob!.upstreamId, "completed");
 		await processPendingVideoJobs();
 		await processPendingWebhookDeliveries();
+
+		const logs = await db.query.log.findMany({
+			where: { usedModel: { eq: "veo-3.1-fast" } },
+		});
+		expect(logs).toHaveLength(1);
+		expect(logs[0].requestCost).toBe(0);
+		expect(logs[0].videoOutputCost).toBe(1.2);
 
 		const deliveries = getMockWebhookDeliveries("video-job");
 		expect(deliveries).toHaveLength(1);
@@ -301,7 +309,7 @@ describe("test", () => {
 				Authorization: "Bearer real-token",
 			},
 			body: JSON.stringify({
-				model: "veo-3.1",
+				model: "veo-3.1-generate-preview",
 				prompt: "A spaceship landing on Mars",
 				callback_url: `${mockServerUrl}/mock-callback/retry-video`,
 				callback_secret: "whsec_retry",
@@ -350,7 +358,7 @@ describe("test", () => {
 				Authorization: "Bearer real-token",
 			},
 			body: JSON.stringify({
-				model: "veo-3.1",
+				model: "veo-3.1-generate-preview",
 				prompt: "A fast moving train in the desert",
 				seconds: 8,
 			}),
@@ -392,7 +400,7 @@ describe("test", () => {
 				Authorization: "Bearer real-token",
 			},
 			body: JSON.stringify({
-				model: "veo-3.1",
+				model: "veo-3.1-generate-preview",
 				prompt: "A waterfall in slow motion",
 			}),
 		});

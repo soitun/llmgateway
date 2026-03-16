@@ -192,17 +192,24 @@ describe("Models API", () => {
 		]);
 	});
 
-	test("GET /v1/models should include proper output modalities for veo-3.1", async () => {
+	test("GET /v1/models should include proper output modalities for Veo 3.1 preview models", async () => {
 		const res = await app.request("/v1/models?include_deactivated=true");
 		expect(res.status).toBe(200);
 
 		const json = await res.json();
 
-		const videoModel = json.data.find((model: any) => model.id === "veo-3.1");
+		for (const modelId of [
+			"veo-3.1-generate-preview",
+			"veo-3.1-fast-generate-preview",
+		]) {
+			const videoModel = json.data.find((model: any) => model.id === modelId);
 
-		expect(videoModel).toBeDefined();
-		expect(videoModel.architecture.input_modalities).toEqual(["text"]);
-		expect(videoModel.architecture.output_modalities).toEqual(["video"]);
+			expect(videoModel).toBeDefined();
+			expect(videoModel.architecture.input_modalities).toEqual(["text"]);
+			expect(videoModel.architecture.output_modalities).toEqual(["video"]);
+			expect(videoModel.pricing.per_second).toBeDefined();
+			expect(videoModel.providers[0].pricing.per_second).toBeDefined();
+		}
 	});
 
 	test("GET /v1/models should include stability information for models", async () => {

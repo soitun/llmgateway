@@ -142,6 +142,10 @@ interface MockVideoJobState {
 	model: string;
 	status: string;
 	progress: number;
+	duration?: number;
+	resolution?: string;
+	width?: number;
+	height?: number;
 	created_at: number;
 	completed_at: number | null;
 	expires_at: number | null;
@@ -371,6 +375,10 @@ mockOpenAIServer.post("/v1/videos", async (c) => {
 		model: body.model ?? "veo-3.1",
 		status: "queued",
 		progress: 0,
+		duration: 8,
+		resolution: "1080p",
+		width: 1920,
+		height: 1080,
 		created_at: Math.floor(Date.now() / 1000),
 		completed_at: null,
 		expires_at: null,
@@ -397,6 +405,30 @@ mockOpenAIServer.get("/v1/videos/:id", async (c) => {
 	}
 
 	return c.json(job);
+});
+
+mockOpenAIServer.get("/v1/videos/:id/content", async (c) => {
+	const id = c.req.param("id");
+	const job = videoJobs.get(id);
+
+	if (!job) {
+		c.status(404);
+		return c.json({
+			error: {
+				message: "Video job not found",
+				code: "not_found",
+			},
+		});
+	}
+
+	return c.json({
+		url: `${currentMockServerUrl}/mock-assets/${id}`,
+		mime_type: "video/mp4",
+		duration: job.duration,
+		resolution: job.resolution,
+		width: job.width,
+		height: job.height,
+	});
 });
 
 mockOpenAIServer.get("/mock-assets/:id", async (c) => {

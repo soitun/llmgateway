@@ -37,6 +37,7 @@ const modelSchema = z.object({
 					prompt: z.string(),
 					completion: z.string(),
 					image: z.string().optional(),
+					per_second: z.record(z.string()).optional(),
 				})
 				.optional(),
 			streaming: z.boolean(),
@@ -54,6 +55,7 @@ const modelSchema = z.object({
 		prompt: z.string(),
 		completion: z.string(),
 		image: z.string().optional(),
+		per_second: z.record(z.string()).optional(),
 		request: z.string().optional(),
 		input_cache_read: z.string().optional(),
 		input_cache_write: z.string().optional(),
@@ -163,7 +165,8 @@ modelsApi.openapi(listModels, async (c) => {
 				(p: ProviderModelMapping) =>
 					p.inputPrice !== undefined ||
 					p.outputPrice !== undefined ||
-					p.imageInputPrice !== undefined,
+					p.imageInputPrice !== undefined ||
+					p.perSecondPrice !== undefined,
 			);
 
 			const inputPrice =
@@ -200,11 +203,22 @@ modelsApi.openapi(listModels, async (c) => {
 						pricing:
 							provider.inputPrice !== undefined ||
 							provider.outputPrice !== undefined ||
-							provider.imageInputPrice !== undefined
+							provider.imageInputPrice !== undefined ||
+							provider.perSecondPrice !== undefined
 								? {
 										prompt: provider.inputPrice?.toString() ?? "0",
 										completion: provider.outputPrice?.toString() ?? "0",
 										image: provider.imageInputPrice?.toString() ?? "0",
+										per_second: provider.perSecondPrice
+											? Object.fromEntries(
+													Object.entries(provider.perSecondPrice).map(
+														([resolution, price]) => [
+															resolution,
+															price.toString(),
+														],
+													),
+												)
+											: undefined,
 									}
 								: undefined,
 						streaming: provider.streaming,
@@ -220,6 +234,13 @@ modelsApi.openapi(listModels, async (c) => {
 					prompt: inputPrice,
 					completion: outputPrice,
 					image: imagePrice,
+					per_second: firstProviderWithPricing?.perSecondPrice
+						? Object.fromEntries(
+								Object.entries(firstProviderWithPricing.perSecondPrice).map(
+									([resolution, price]) => [resolution, price.toString()],
+								),
+							)
+						: undefined,
 					request: firstProviderWithPricing?.requestPrice?.toString() ?? "0",
 					input_cache_read:
 						firstProviderWithPricing?.cachedInputPrice?.toString() ?? "0",

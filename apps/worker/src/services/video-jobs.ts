@@ -18,7 +18,8 @@ import { models, type ProviderModelMapping } from "@llmgateway/models";
 const MAX_WEBHOOK_ATTEMPTS = 8;
 const WEBHOOK_BASE_DELAY_MS = 30_000;
 const WEBHOOK_MAX_DELAY_MS = 60 * 60 * 1000;
-
+const VIDEO_RESOLUTION_4K = "4k";
+const VIDEO_DEFAULT_RESOLUTION = "default";
 const ACTIVE_VIDEO_STATUSES = ["queued", "in_progress"] as const;
 const TERMINAL_VIDEO_STATUS_VALUES: Array<VideoJobRecord["status"]> = [
 	"completed",
@@ -205,12 +206,131 @@ function serializeVideoJob(job: VideoJobRecord) {
 	};
 }
 
-function getRequestPrice(modelId: string, providerId: string): number {
-	const model = models.find((item) => item.id === modelId);
+function getVideoMetadataCandidates(
+	job: VideoJobRecord,
+): Array<Record<string, unknown>> {
+	return [job.upstreamStatusResponse, job.upstreamCreateResponse].filter(
+		(candidate): candidate is Record<string, unknown> =>
+			Boolean(candidate) && typeof candidate === "object",
+	);
+}
+
+function readNestedValue(
+	body: Record<string, unknown>,
+	key: string,
+): unknown | undefined {
+	if (key in body) {
+		return body[key];
+	}
+
+	if (body.data && typeof body.data === "object") {
+		const data = body.data as Record<string, unknown>;
+		if (key in data) {
+			return data[key];
+		}
+	}
+
+	return undefined;
+}
+
+function extractVideoDurationSeconds(job: VideoJobRecord): number | null {
+	for (const candidate of getVideoMetadataCandidates(job)) {
+		for (const key of [
+			"duration",
+			"duration_seconds",
+			"durationSeconds",
+			"seconds",
+		]) {
+			const value = readNestedValue(candidate, key);
+			if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+				return value;
+			}
+
+			if (typeof value === "string" && value.length > 0) {
+				const match = value.match(/(\d+(?:\.\d+)?)/);
+				if (match) {
+					const parsed = Number(match[1]);
+					if (!Number.isNaN(parsed) && parsed > 0) {
+						return parsed;
+					}
+				}
+			}
+		}
+	}
+
+	return null;
+}
+
+function is4kVideo(job: VideoJobRecord): boolean {
+	for (const candidate of getVideoMetadataCandidates(job)) {
+		for (const key of ["resolution", "size", "quality"]) {
+			const value = readNestedValue(candidate, key);
+			if (
+				typeof value === "string" &&
+				(value.toLowerCase().includes("4k") ||
+					value.toLowerCase().includes("2160"))
+			) {
+				return true;
+			}
+		}
+
+		for (const key of ["height", "width"]) {
+			const value = readNestedValue(candidate, key);
+			if (typeof value === "number" && value >= 2160) {
+				return true;
+			}
+			if (typeof value === "string") {
+				const parsed = Number(value);
+				if (!Number.isNaN(parsed) && parsed >= 2160) {
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+function getVideoPricing(job: VideoJobRecord): Record<string, number> | null {
+	const model = models.find((item) => item.id === job.model);
 	const mapping = model?.providers.find(
-		(provider) => provider.providerId === providerId,
+		(provider) => provider.providerId === job.usedProvider,
 	) as ProviderModelMapping | undefined;
-	return mapping?.requestPrice ?? 0;
+	return mapping?.perSecondPrice ?? null;
+}
+
+function getVideoOutputCost(job: VideoJobRecord): number {
+	const pricing = getVideoPricing(job);
+	if (!pricing) {
+		return 0;
+	}
+
+	const durationSeconds = extractVideoDurationSeconds(job);
+	if (durationSeconds === null) {
+		logger.warn("Could not determine video duration for billing", {
+			videoId: job.id,
+			model: job.model,
+			upstreamId: job.upstreamId,
+		});
+		return 0;
+	}
+
+	const resolutionKey = is4kVideo(job)
+		? VIDEO_RESOLUTION_4K
+		: VIDEO_DEFAULT_RESOLUTION;
+	const pricePerSecond =
+		pricing[resolutionKey] ?? pricing[VIDEO_DEFAULT_RESOLUTION];
+	if (pricePerSecond === undefined) {
+		logger.warn("Could not determine per-second video price", {
+			videoId: job.id,
+			model: job.model,
+			upstreamId: job.upstreamId,
+			resolutionKey,
+		});
+		return 0;
+	}
+
+	return Number((durationSeconds * pricePerSecond).toFixed(6));
 }
 
 function calculateNextWebhookRetryAt(attempt: number): Date {
@@ -240,10 +360,8 @@ async function finalizeVideoJob(job: VideoJobRecord): Promise<void> {
 
 	if (!currentJob.resultLoggedAt) {
 		const now = new Date();
-		const requestCost =
-			currentJob.status === "completed"
-				? getRequestPrice(currentJob.model, currentJob.usedProvider)
-				: 0;
+		const videoOutputCost =
+			currentJob.status === "completed" ? getVideoOutputCost(currentJob) : 0;
 		const responsePayload = serializeVideoJob(currentJob);
 		const responseSize = JSON.stringify(responsePayload).length;
 
@@ -276,8 +394,9 @@ async function finalizeVideoJob(job: VideoJobRecord): Promise<void> {
 						responseText: currentJob.error.message,
 					}
 				: null,
-			cost: requestCost,
-			requestCost,
+			cost: videoOutputCost,
+			requestCost: 0,
+			videoOutputCost,
 			estimatedCost: false,
 			mode: currentJob.mode,
 			usedMode: currentJob.usedMode,
@@ -371,6 +490,41 @@ async function fetchUpstreamStatus(
 	return body;
 }
 
+async function fetchUpstreamContentMetadata(
+	job: VideoJobRecord,
+): Promise<Record<string, unknown> | null> {
+	const url = joinUrl(
+		job.providerBaseUrl,
+		`/v1/videos/${job.upstreamId}/content`,
+	);
+	const response = await fetch(url, {
+		method: "GET",
+		headers: {
+			Authorization: `Bearer ${job.providerToken}`,
+			Accept: "application/json",
+		},
+		redirect: "manual",
+	});
+	const contentType = response.headers.get("Content-Type") ?? "";
+	if (!contentType.toLowerCase().includes("application/json")) {
+		return null;
+	}
+	const text = await response.text();
+
+	if (!response.ok || text.length === 0) {
+		return null;
+	}
+
+	try {
+		const body = JSON.parse(text) as unknown;
+		return body && typeof body === "object"
+			? (body as Record<string, unknown>)
+			: null;
+	} catch {
+		return null;
+	}
+}
+
 export async function processPendingVideoJobs(): Promise<void> {
 	const now = new Date();
 	const jobsToPoll = await db
@@ -390,8 +544,23 @@ export async function processPendingVideoJobs(): Promise<void> {
 			const status = normalizeVideoStatus(upstreamStatus.status);
 			const progress = extractProgress(upstreamStatus);
 			const isTerminal = TERMINAL_VIDEO_STATUSES.has(status);
+			let contentMetadata: Record<string, unknown> | null = null;
+			if (status === "completed") {
+				try {
+					contentMetadata = await fetchUpstreamContentMetadata(job);
+				} catch (error) {
+					logger.warn("Could not fetch upstream video content metadata", {
+						videoJobId: job.id,
+						upstreamId: job.upstreamId,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
+			const enrichedUpstreamStatus = contentMetadata
+				? { ...upstreamStatus, ...contentMetadata }
+				: upstreamStatus;
 			const completedAt =
-				parseTimestamp(upstreamStatus.completed_at) ??
+				parseTimestamp(enrichedUpstreamStatus.completed_at) ??
 				(isTerminal ? new Date() : job.completedAt);
 
 			const updatedJob = await db
@@ -399,18 +568,20 @@ export async function processPendingVideoJobs(): Promise<void> {
 				.set({
 					status,
 					progress,
-					error: extractError(upstreamStatus),
-					contentUrl: extractContentUrl(upstreamStatus) ?? job.contentUrl,
+					error: extractError(enrichedUpstreamStatus),
+					contentUrl:
+						extractContentUrl(enrichedUpstreamStatus) ?? job.contentUrl,
 					contentType:
-						typeof upstreamStatus.mime_type === "string"
-							? upstreamStatus.mime_type
+						typeof enrichedUpstreamStatus.mime_type === "string"
+							? enrichedUpstreamStatus.mime_type
 							: job.contentType,
 					completedAt,
-					expiresAt: parseTimestamp(upstreamStatus.expires_at) ?? job.expiresAt,
+					expiresAt:
+						parseTimestamp(enrichedUpstreamStatus.expires_at) ?? job.expiresAt,
 					lastPolledAt: now,
 					nextPollAt: isTerminal ? now : new Date(Date.now() + 5_000),
 					pollAttemptCount: job.pollAttemptCount + 1,
-					upstreamStatusResponse: upstreamStatus,
+					upstreamStatusResponse: enrichedUpstreamStatus,
 				})
 				.where(eq(tables.videoJob.id, job.id))
 				.returning()
