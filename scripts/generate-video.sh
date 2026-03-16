@@ -5,14 +5,16 @@ set -eu
 BASE_URL="https://api.llmgateway.io"
 API_KEY="${LLM_GATEWAY_API_KEY:-test-token}"
 MODEL="veo-3.1-generate-preview"
+SIZE=""
 PROMPT=""
 OUTPUT=""
 POLL_INTERVAL="5"
 CALLBACK_URL=""
 CALLBACK_SECRET=""
+PROMPT_ARGS=""
 
 usage() {
-	echo "Usage: $0 [--local] [--model MODEL] [--output FILE] [--interval SECONDS] [--callback-url URL --callback-secret SECRET] <prompt>" >&2
+	echo "Usage: $0 [--local] [--model MODEL] [--size WIDTHxHEIGHT] [--output FILE] [--interval SECONDS] [--callback-url URL --callback-secret SECRET] <prompt>" >&2
 	exit 1
 }
 
@@ -39,6 +41,11 @@ while [ "$#" -gt 0 ]; do
 		--model)
 			[ "$#" -ge 2 ] || usage
 			MODEL="$2"
+			shift 2
+			;;
+		--size)
+			[ "$#" -ge 2 ] || usage
+			SIZE="$2"
 			shift 2
 			;;
 		--output)
@@ -73,15 +80,17 @@ while [ "$#" -gt 0 ]; do
 			usage
 			;;
 		*)
-			PROMPT="$1"
-			shift
-			if [ "$#" -gt 0 ]; then
-				PROMPT="$PROMPT $*"
+			if [ -n "$PROMPT_ARGS" ]; then
+				PROMPT_ARGS="$PROMPT_ARGS $1"
+			else
+				PROMPT_ARGS="$1"
 			fi
-			break
+			shift
 			;;
 	esac
 done
+
+PROMPT="$PROMPT_ARGS"
 
 if [ -z "$PROMPT" ]; then
 	usage
@@ -106,6 +115,7 @@ trap 'rm -f "$CREATE_RESPONSE_FILE" "$STATUS_RESPONSE_FILE" "$FINAL_RESPONSE_FIL
 PAYLOAD=$(
 	jq -n \
 		--arg model "$MODEL" \
+		--arg size "$SIZE" \
 		--arg prompt "$PROMPT" \
 		--arg callback_url "$CALLBACK_URL" \
 		--arg callback_secret "$CALLBACK_SECRET" \
@@ -113,6 +123,15 @@ PAYLOAD=$(
 			model: $model,
 			prompt: $prompt
 		}
+		+ (
+			if $size != "" then
+				{
+					size: $size
+				}
+			else
+				{}
+			end
+		)
 		+ (
 			if $callback_url != "" then
 				{
@@ -126,7 +145,7 @@ PAYLOAD=$(
 )
 
 log "Creating video job"
-log "base_url=${BASE_URL} model=${MODEL}"
+log "base_url=${BASE_URL} model=${MODEL} size=${SIZE:-default}"
 CREATE_STATUS=$(
 	curl -sS \
 		-o "$CREATE_RESPONSE_FILE" \
