@@ -668,6 +668,131 @@ async function fetchAvalancheStatus(
 	return normalizedRecordInfo;
 }
 
+function getGoogleVertexOperationMetadata(job: VideoJobRecord): {
+	projectId: string;
+	region: string;
+	modelName: string;
+} | null {
+	for (const candidate of getVideoMetadataCandidates(job)) {
+		const projectId = readNestedValue(candidate, "google_vertex_project_id");
+		const region = readNestedValue(candidate, "google_vertex_region");
+		const modelName = readNestedValue(candidate, "google_vertex_model_name");
+
+		if (
+			typeof projectId === "string" &&
+			projectId.length > 0 &&
+			typeof region === "string" &&
+			region.length > 0 &&
+			typeof modelName === "string" &&
+			modelName.length > 0
+		) {
+			return {
+				projectId,
+				region,
+				modelName,
+			};
+		}
+	}
+
+	return null;
+}
+
+function normalizeGoogleVertexOperation(
+	job: VideoJobRecord,
+	body: Record<string, unknown>,
+): Record<string, unknown> {
+	const response =
+		body.response && typeof body.response === "object"
+			? (body.response as Record<string, unknown>)
+			: {};
+	const videos = Array.isArray(response.videos) ? response.videos : [];
+	const firstVideo =
+		videos[0] && typeof videos[0] === "object"
+			? (videos[0] as Record<string, unknown>)
+			: null;
+	const gcsUri =
+		firstVideo && typeof firstVideo.gcsUri === "string"
+			? firstVideo.gcsUri
+			: null;
+	const mimeType =
+		firstVideo && typeof firstVideo.mimeType === "string"
+			? firstVideo.mimeType
+			: "video/mp4";
+	const status =
+		body.done === true
+			? body.error && typeof body.error === "object"
+				? "failed"
+				: "completed"
+			: "in_progress";
+	const error =
+		status === "failed"
+			? {
+					message:
+						body.error &&
+						typeof body.error === "object" &&
+						"message" in body.error &&
+						typeof body.error.message === "string"
+							? body.error.message
+							: "Google Vertex video generation failed",
+					code:
+						body.error &&
+						typeof body.error === "object" &&
+						"code" in body.error &&
+						typeof body.error.code === "number"
+							? String(body.error.code)
+							: undefined,
+					details: body.error ?? body,
+				}
+			: null;
+
+	return addRequestedVideoMetadata(job, {
+		...body,
+		status,
+		progress: status === "completed" || status === "failed" ? 100 : 50,
+		url: gcsUri,
+		output_url: gcsUri,
+		mime_type: mimeType,
+		error,
+	});
+}
+
+async function fetchGoogleVertexStatus(
+	job: VideoJobRecord,
+): Promise<Record<string, unknown>> {
+	const operationMetadata = getGoogleVertexOperationMetadata(job);
+	if (!operationMetadata) {
+		throw new Error("Missing Google Vertex operation metadata");
+	}
+
+	const url = joinUrl(
+		job.providerBaseUrl,
+		`/v1/projects/${operationMetadata.projectId}/locations/${operationMetadata.region}/publishers/google/models/${operationMetadata.modelName}:fetchPredictOperation`,
+	);
+	const { body, response } = await fetchJsonResponse(url, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			...getVideoProviderHeaders(job),
+		},
+		body: JSON.stringify({
+			operationName: job.upstreamId,
+		}),
+	});
+
+	if (!response.ok) {
+		throw new Error(
+			body.error &&
+			typeof body.error === "object" &&
+			"message" in body.error &&
+			typeof body.error.message === "string"
+				? body.error.message
+				: `Google Vertex status request failed with status ${response.status}`,
+		);
+	}
+
+	return normalizeGoogleVertexOperation(job, body);
+}
+
 function extractVideoDurationSeconds(job: VideoJobRecord): number | null {
 	for (const candidate of getVideoMetadataCandidates(job)) {
 		for (const key of [
@@ -893,6 +1018,10 @@ async function fetchUpstreamStatus(
 		return await fetchAvalancheStatus(job);
 	}
 
+	if (job.usedProvider === "google-vertex") {
+		return await fetchGoogleVertexStatus(job);
+	}
+
 	const url = joinUrl(job.providerBaseUrl, `/v1/videos/${job.upstreamId}`);
 	const { body, response } = await fetchJsonResponse(url, {
 		method: "GET",
@@ -916,7 +1045,10 @@ async function fetchUpstreamStatus(
 async function fetchUpstreamContentMetadata(
 	job: VideoJobRecord,
 ): Promise<Record<string, unknown> | null> {
-	if (job.usedProvider === "avalanche") {
+	if (
+		job.usedProvider === "avalanche" ||
+		job.usedProvider === "google-vertex"
+	) {
 		return null;
 	}
 

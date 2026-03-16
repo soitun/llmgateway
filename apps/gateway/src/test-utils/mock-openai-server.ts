@@ -221,6 +221,32 @@ function getMockVideoSizeMetadata(size: unknown): {
 	}
 }
 
+function getMockVertexVideoSizeMetadata(
+	resolution: unknown,
+	aspectRatio: unknown,
+): {
+	size: string;
+	resolution: string;
+	width: number;
+	height: number;
+} {
+	if (resolution === "4k") {
+		return aspectRatio === "9:16"
+			? getMockVideoSizeMetadata("2160x3840")
+			: getMockVideoSizeMetadata("3840x2160");
+	}
+
+	if (resolution === "1080p") {
+		return aspectRatio === "9:16"
+			? getMockVideoSizeMetadata("1080x1920")
+			: getMockVideoSizeMetadata("1920x1080");
+	}
+
+	return aspectRatio === "9:16"
+		? getMockVideoSizeMetadata("720x1280")
+		: getMockVideoSizeMetadata("1280x720");
+}
+
 export function resetFailOnceCounter() {
 	failOnceCounter = 0;
 }
@@ -492,6 +518,119 @@ mockOpenAIServer.post("/api/v1/veo/generate", async (c) => {
 		},
 	});
 });
+
+mockOpenAIServer.post(
+	"/v1/projects/:project/locations/:location/publishers/google/models/*",
+	async (c, next) => {
+		const body = await c.req.json();
+		const modelPath = c.req.path.split("/models/")[1] ?? "";
+		const [modelName, action] = modelPath.split(":");
+
+		if (action !== "predictLongRunning" && action !== "fetchPredictOperation") {
+			return await next();
+		}
+
+		if (action === "predictLongRunning") {
+			videoCounter++;
+			const operationName = `projects/${c.req.param("project")}/locations/${c.req.param("location")}/publishers/google/models/${modelName}/operations/video_${videoCounter}`;
+			const parameters =
+				body.parameters && typeof body.parameters === "object"
+					? body.parameters
+					: {};
+			const videoSize = getMockVertexVideoSizeMetadata(
+				(parameters as Record<string, unknown>).resolution,
+				(parameters as Record<string, unknown>).aspectRatio,
+			);
+			const job: MockVideoJobState = {
+				id: operationName,
+				object: "video",
+				model: modelName || "veo-3.1-generate-preview",
+				status: "queued",
+				progress: 0,
+				size: videoSize.size,
+				duration: 8,
+				resolution: videoSize.resolution,
+				width: videoSize.width,
+				height: videoSize.height,
+				created_at: Math.floor(Date.now() / 1000),
+				completed_at: null,
+				expires_at: null,
+				error: null,
+			};
+
+			videoJobs.set(operationName, job);
+
+			return c.json({
+				name: operationName,
+				done: false,
+			});
+		}
+
+		if (action === "fetchPredictOperation") {
+			const operationName =
+				body && typeof body === "object" ? body.operationName : undefined;
+
+			if (typeof operationName !== "string" || operationName.length === 0) {
+				c.status(400);
+				return c.json({
+					error: {
+						message: "operationName is required",
+					},
+				});
+			}
+
+			const job = videoJobs.get(operationName);
+			if (!job) {
+				c.status(404);
+				return c.json({
+					error: {
+						message: "Operation not found",
+					},
+				});
+			}
+
+			if (job.status === "failed") {
+				return c.json({
+					name: operationName,
+					done: true,
+					error: {
+						code: 13,
+						message: "Mock Vertex generation failed",
+					},
+				});
+			}
+
+			if (job.status !== "completed") {
+				return c.json({
+					name: operationName,
+					done: false,
+				});
+			}
+
+			return c.json({
+				name: operationName,
+				done: true,
+				response: {
+					videos: [
+						{
+							bytesBase64Encoded: Buffer.from(
+								`mock-video-${operationName}`,
+							).toString("base64"),
+							mimeType: "video/mp4",
+						},
+					],
+				},
+			});
+		}
+
+		c.status(404);
+		return c.json({
+			error: {
+				message: "Unsupported Google Vertex mock action",
+			},
+		});
+	},
+);
 
 mockOpenAIServer.get("/v1/videos/:id", async (c) => {
 	const id = c.req.param("id");

@@ -426,6 +426,95 @@ describe("test", () => {
 		expect(logs[0].cost).toBe(2.8);
 	});
 
+	test("/v1/videos supports completed google-vertex jobs", async () => {
+		const originalGoogleCloudProject = process.env.LLM_GOOGLE_CLOUD_PROJECT;
+		const originalGoogleVertexRegion = process.env.LLM_GOOGLE_VERTEX_REGION;
+		process.env.LLM_GOOGLE_CLOUD_PROJECT = "test-project";
+		process.env.LLM_GOOGLE_VERTEX_REGION = "us-central1";
+
+		try {
+			await db.insert(tables.apiKey).values({
+				id: "token-id",
+				token: "real-token",
+				projectId: "project-id",
+				description: "Test API Key",
+				createdBy: "user-id",
+			});
+
+			await db.insert(tables.providerKey).values({
+				id: "provider-key-id",
+				token: "vertex-test-token",
+				provider: "google-vertex",
+				organizationId: "org-id",
+				baseUrl: mockServerUrl,
+			});
+
+			const createRes = await app.request("/v1/videos", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer real-token",
+				},
+				body: JSON.stringify({
+					model: "google-vertex/veo-3.1-generate-preview",
+					prompt: "A cinematic waterfall in the mountains",
+					size: "3840x2160",
+				}),
+			});
+
+			expect(createRes.status).toBe(200);
+			const created = await createRes.json();
+
+			const videoJob = await db.query.videoJob.findFirst({
+				where: { id: { eq: created.id } },
+			});
+			expect(videoJob).toBeTruthy();
+			expect(videoJob?.usedProvider).toBe("google-vertex");
+			expect(videoJob?.usedModel).toBe("veo-3.1-generate-preview");
+
+			setMockVideoStatus(videoJob!.upstreamId, "completed");
+			await processPendingVideoJobs();
+
+			const getRes = await app.request(`/v1/videos/${created.id}`, {
+				headers: {
+					Authorization: "Bearer real-token",
+				},
+			});
+			expect(getRes.status).toBe(200);
+			const jobJson = await getRes.json();
+			expect(jobJson.status).toBe("completed");
+
+			const contentRes = await app.request(`/v1/videos/${created.id}/content`, {
+				headers: {
+					Authorization: "Bearer real-token",
+				},
+			});
+			expect(contentRes.status).toBe(200);
+			expect(contentRes.headers.get("content-type")).toContain("video/mp4");
+			expect(await contentRes.text()).toBe(
+				`mock-video-${videoJob!.upstreamId}`,
+			);
+
+			const logs = await db.query.log.findMany({
+				where: { usedProvider: { eq: "google-vertex" } },
+			});
+			expect(logs).toHaveLength(1);
+			expect(logs[0].videoOutputCost).toBe(4.8);
+			expect(logs[0].cost).toBe(4.8);
+		} finally {
+			if (originalGoogleCloudProject !== undefined) {
+				process.env.LLM_GOOGLE_CLOUD_PROJECT = originalGoogleCloudProject;
+			} else {
+				delete process.env.LLM_GOOGLE_CLOUD_PROJECT;
+			}
+			if (originalGoogleVertexRegion !== undefined) {
+				process.env.LLM_GOOGLE_VERTEX_REGION = originalGoogleVertexRegion;
+			} else {
+				delete process.env.LLM_GOOGLE_VERTEX_REGION;
+			}
+		}
+	});
+
 	test("/v1/videos delivers signed callbacks after completion", async () => {
 		await db.insert(tables.apiKey).values({
 			id: "token-id",

@@ -93,7 +93,7 @@ const createVideoRequestSchema = z
 	.object({
 		model: z.string().default("veo-3.1-generate-preview").openapi({
 			description:
-				"The video generation model to use. Supported values: veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/ or avalanche/ prefixed variants.",
+				"The video generation model to use. Supported values: veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/, avalanche/, or google-vertex/ prefixed variants.",
 			example: "veo-3.1-generate-preview",
 		}),
 		prompt: z.string().min(1).openapi({
@@ -103,7 +103,7 @@ const createVideoRequestSchema = z
 		}),
 		size: z.string().optional().openapi({
 			description:
-				"Output resolution in OpenAI widthxheight format. Obsidian supports 1280x720 and 720x1280. Avalanche supports 1920x1080, 1080x1920, 3840x2160, and 2160x3840.",
+				"Output resolution in OpenAI widthxheight format. Obsidian supports 1280x720 and 720x1280. Avalanche supports 1920x1080, 1080x1920, 3840x2160, and 2160x3840. Google Vertex supports 1280x720, 720x1280, 1920x1080, 1080x1920, 3840x2160, and 2160x3840.",
 			example: "1280x720",
 		}),
 		callback_url: z.string().url().optional().openapi({
@@ -306,6 +306,8 @@ interface ProviderContext {
 	baseUrl: string;
 	token: string;
 	usedMode: "api-keys" | "credits";
+	vertexProjectId?: string;
+	vertexRegion?: string;
 }
 
 interface ResolvedVideoExecution {
@@ -408,7 +410,11 @@ function getVideoModel(model: string): {
 		};
 	}
 
-	for (const providerId of ["obsidian", "avalanche"] as const) {
+	for (const providerId of [
+		"obsidian",
+		"avalanche",
+		"google-vertex",
+	] as const) {
 		if (model.startsWith(`${providerId}/`)) {
 			const normalizedModel = model.slice(`${providerId}/`.length);
 			if (supportedModels.has(normalizedModel)) {
@@ -422,7 +428,7 @@ function getVideoModel(model: string): {
 
 	throw new HTTPException(400, {
 		message:
-			"Unsupported video model. Only veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/ or avalanche/ prefixed variants are supported right now.",
+			"Unsupported video model. Only veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/, avalanche/, or google-vertex/ prefixed variants are supported right now.",
 	});
 }
 
@@ -494,6 +500,8 @@ function getVideoUpstreamModelName(
 			return getObsidianVideoModelName(baseModelName, videoSize);
 		case "avalanche":
 			return getAvalancheVideoModelName(baseModelName);
+		case "google-vertex":
+			return baseModelName;
 		default:
 			return baseModelName;
 	}
@@ -501,6 +509,32 @@ function getVideoUpstreamModelName(
 
 function getAvalancheAspectRatio(videoSize: VideoSizeConfig): "16:9" | "9:16" {
 	return videoSize.orientation === "portrait" ? "9:16" : "16:9";
+}
+
+function getVertexAspectRatio(videoSize: VideoSizeConfig): "16:9" | "9:16" {
+	return videoSize.orientation === "portrait" ? "9:16" : "16:9";
+}
+
+function getVertexResolution(
+	videoSize: VideoSizeConfig,
+): "720p" | "1080p" | "4k" {
+	switch (videoSize.resolution) {
+		case "1080p":
+			return "1080p";
+		case "4k":
+			return "4k";
+		default:
+			return "720p";
+	}
+}
+
+function getDefaultVideoProviderBaseUrl(providerId: Provider): string | null {
+	switch (providerId) {
+		case "google-vertex":
+			return "https://us-central1-aiplatform.googleapis.com";
+		default:
+			return null;
+	}
 }
 
 function addRequestedVideoMetadata(
@@ -533,6 +567,21 @@ async function resolveProviderContext(
 	project: InferSelectModel<typeof tables.project>,
 	organizationId: string,
 ): Promise<ProviderContext> {
+	const defaultBaseUrl = getDefaultVideoProviderBaseUrl(providerId);
+	const sharedVertexProjectId =
+		providerId === "google-vertex"
+			? getProviderEnvValue("google-vertex", "project")
+			: undefined;
+	const sharedVertexRegion =
+		providerId === "google-vertex"
+			? (getProviderEnvValue(
+					"google-vertex",
+					"region",
+					undefined,
+					"us-central1",
+				) ?? "us-central1")
+			: undefined;
+
 	if (project.mode === "api-keys") {
 		const providerKey = await findProviderKey(organizationId, providerId);
 		if (!providerKey) {
@@ -542,10 +591,19 @@ async function resolveProviderContext(
 		}
 
 		const baseUrl =
-			providerKey.baseUrl ?? getProviderEnvValue(providerId, "baseUrl");
+			providerKey.baseUrl ??
+			getProviderEnvValue(providerId, "baseUrl") ??
+			defaultBaseUrl;
 		if (!baseUrl) {
 			throw new HTTPException(400, {
 				message: `No base URL set for provider: ${providerId}`,
+			});
+		}
+
+		if (providerId === "google-vertex" && !sharedVertexProjectId) {
+			throw new HTTPException(500, {
+				message:
+					"LLM_GOOGLE_CLOUD_PROJECT environment variable is required for google-vertex video generation",
 			});
 		}
 
@@ -554,15 +612,40 @@ async function resolveProviderContext(
 			baseUrl,
 			token: providerKey.token,
 			usedMode: "api-keys",
+			vertexProjectId: sharedVertexProjectId,
+			vertexRegion: sharedVertexRegion,
 		};
 	}
 
 	if (project.mode === "credits") {
 		const env = getProviderEnv(providerId);
-		const baseUrl = getProviderEnvValue(providerId, "baseUrl", env.configIndex);
+		const baseUrl =
+			getProviderEnvValue(providerId, "baseUrl", env.configIndex) ??
+			defaultBaseUrl;
 		if (!baseUrl) {
 			throw new HTTPException(500, {
 				message: `Base URL environment variable is required for ${providerId} provider`,
+			});
+		}
+
+		const vertexProjectId =
+			providerId === "google-vertex"
+				? getProviderEnvValue("google-vertex", "project", env.configIndex)
+				: undefined;
+		const vertexRegion =
+			providerId === "google-vertex"
+				? (getProviderEnvValue(
+						"google-vertex",
+						"region",
+						env.configIndex,
+						"us-central1",
+					) ?? "us-central1")
+				: undefined;
+
+		if (providerId === "google-vertex" && !vertexProjectId) {
+			throw new HTTPException(500, {
+				message:
+					"LLM_GOOGLE_CLOUD_PROJECT environment variable is required for google-vertex video generation",
 			});
 		}
 
@@ -571,16 +654,27 @@ async function resolveProviderContext(
 			baseUrl,
 			token: env.token,
 			usedMode: "credits",
+			vertexProjectId,
+			vertexRegion,
 		};
 	}
 
 	const providerKey = await findProviderKey(organizationId, providerId);
 	if (providerKey) {
 		const baseUrl =
-			providerKey.baseUrl ?? getProviderEnvValue(providerId, "baseUrl");
+			providerKey.baseUrl ??
+			getProviderEnvValue(providerId, "baseUrl") ??
+			defaultBaseUrl;
 		if (!baseUrl) {
 			throw new HTTPException(400, {
 				message: `No base URL set for provider: ${providerId}`,
+			});
+		}
+
+		if (providerId === "google-vertex" && !sharedVertexProjectId) {
+			throw new HTTPException(500, {
+				message:
+					"LLM_GOOGLE_CLOUD_PROJECT environment variable is required for google-vertex video generation",
 			});
 		}
 
@@ -589,6 +683,8 @@ async function resolveProviderContext(
 			baseUrl,
 			token: providerKey.token,
 			usedMode: "api-keys",
+			vertexProjectId: sharedVertexProjectId,
+			vertexRegion: sharedVertexRegion,
 		};
 	}
 
@@ -599,10 +695,33 @@ async function resolveProviderContext(
 	}
 
 	const env = getProviderEnv(providerId);
-	const baseUrl = getProviderEnvValue(providerId, "baseUrl", env.configIndex);
+	const baseUrl =
+		getProviderEnvValue(providerId, "baseUrl", env.configIndex) ??
+		defaultBaseUrl;
 	if (!baseUrl) {
 		throw new HTTPException(500, {
 			message: `Base URL environment variable is required for ${providerId} provider`,
+		});
+	}
+
+	const vertexProjectId =
+		providerId === "google-vertex"
+			? getProviderEnvValue("google-vertex", "project", env.configIndex)
+			: undefined;
+	const vertexRegion =
+		providerId === "google-vertex"
+			? (getProviderEnvValue(
+					"google-vertex",
+					"region",
+					env.configIndex,
+					"us-central1",
+				) ?? "us-central1")
+			: undefined;
+
+	if (providerId === "google-vertex" && !vertexProjectId) {
+		throw new HTTPException(500, {
+			message:
+				"LLM_GOOGLE_CLOUD_PROJECT environment variable is required for google-vertex video generation",
 		});
 	}
 
@@ -611,6 +730,8 @@ async function resolveProviderContext(
 		baseUrl,
 		token: env.token,
 		usedMode: "credits",
+		vertexProjectId,
+		vertexRegion,
 	};
 }
 
@@ -619,39 +740,67 @@ async function hasVideoProviderConfiguration(
 	project: InferSelectModel<typeof tables.project>,
 	organizationId: string,
 ): Promise<boolean> {
+	const defaultBaseUrl = getDefaultVideoProviderBaseUrl(providerId);
+
 	if (project.mode === "api-keys") {
 		const providerKey = await findProviderKey(organizationId, providerId);
 		return Boolean(
 			providerKey &&
-				(providerKey.baseUrl ?? getProviderEnvValue(providerId, "baseUrl")),
+				(providerKey.baseUrl ??
+					getProviderEnvValue(providerId, "baseUrl") ??
+					defaultBaseUrl) &&
+				(providerId !== "google-vertex" ||
+					Boolean(getProviderEnvValue("google-vertex", "project"))),
 		);
 	}
 
 	if (project.mode === "credits") {
 		return Boolean(
 			hasProviderEnvironmentToken(providerId) &&
-				getProviderEnvValue(
+				(getProviderEnvValue(
 					providerId,
 					"baseUrl",
 					getProviderEnv(providerId).configIndex,
-				),
+				) ??
+					defaultBaseUrl) &&
+				(providerId !== "google-vertex" ||
+					Boolean(
+						getProviderEnvValue(
+							"google-vertex",
+							"project",
+							getProviderEnv(providerId).configIndex,
+						),
+					)),
 		);
 	}
 
 	const providerKey = await findProviderKey(organizationId, providerId);
 	if (providerKey) {
 		return Boolean(
-			providerKey.baseUrl ?? getProviderEnvValue(providerId, "baseUrl"),
+			(providerKey.baseUrl ??
+				getProviderEnvValue(providerId, "baseUrl") ??
+				defaultBaseUrl) &&
+				(providerId !== "google-vertex" ||
+					Boolean(getProviderEnvValue("google-vertex", "project"))),
 		);
 	}
 
 	return Boolean(
 		hasProviderEnvironmentToken(providerId) &&
-			getProviderEnvValue(
+			(getProviderEnvValue(
 				providerId,
 				"baseUrl",
 				getProviderEnv(providerId).configIndex,
-			),
+			) ??
+				defaultBaseUrl) &&
+			(providerId !== "google-vertex" ||
+				Boolean(
+					getProviderEnvValue(
+						"google-vertex",
+						"project",
+						getProviderEnv(providerId).configIndex,
+					),
+				)),
 	);
 }
 
@@ -902,6 +1051,50 @@ function serializeVideoJob(job: VideoJobRecord) {
 	};
 }
 
+function getGoogleVertexInlineVideo(
+	job: VideoJobRecord,
+): { bytesBase64Encoded: string; mimeType: string } | null {
+	const candidates = [job.upstreamStatusResponse, job.upstreamCreateResponse];
+
+	for (const candidate of candidates) {
+		if (!candidate || typeof candidate !== "object") {
+			continue;
+		}
+
+		const response =
+			"response" in candidate &&
+			candidate.response &&
+			typeof candidate.response === "object"
+				? (candidate.response as Record<string, unknown>)
+				: null;
+		const videos =
+			response && "videos" in response && Array.isArray(response.videos)
+				? response.videos
+				: null;
+		const firstVideo =
+			videos && videos[0] && typeof videos[0] === "object"
+				? (videos[0] as Record<string, unknown>)
+				: null;
+
+		if (
+			firstVideo &&
+			typeof firstVideo.bytesBase64Encoded === "string" &&
+			firstVideo.bytesBase64Encoded.length > 0
+		) {
+			return {
+				bytesBase64Encoded: firstVideo.bytesBase64Encoded,
+				mimeType:
+					typeof firstVideo.mimeType === "string" &&
+					firstVideo.mimeType.length > 0
+						? firstVideo.mimeType
+						: "video/mp4",
+			};
+		}
+	}
+
+	return null;
+}
+
 async function requireVideoJobForProject(
 	projectId: string,
 	videoId: string,
@@ -1010,6 +1203,7 @@ function extractUpstreamVideoId(body: Record<string, unknown>): string | null {
 			: null;
 
 	for (const value of [
+		body.name,
 		body.id,
 		body.video_id,
 		body.job_id,
@@ -1109,6 +1303,77 @@ async function createAvalancheVideoJob(
 	return { upstreamId, upstreamResponse };
 }
 
+async function createGoogleVertexVideoJob(
+	providerContext: ProviderContext,
+	providerMapping: ProviderModelMapping,
+	videoSize: VideoSizeConfig,
+	prompt: string,
+): Promise<{ upstreamId: string; upstreamResponse: Record<string, unknown> }> {
+	if (!providerContext.vertexProjectId || !providerContext.vertexRegion) {
+		throw new HTTPException(500, {
+			message:
+				"Google Vertex video generation requires project and region metadata",
+		});
+	}
+
+	const upstreamModelName = getVideoUpstreamModelName(
+		"google-vertex",
+		providerMapping.modelName,
+		videoSize,
+	);
+	const upstreamUrl = joinUrl(
+		providerContext.baseUrl,
+		`/v1/projects/${providerContext.vertexProjectId}/locations/${providerContext.vertexRegion}/publishers/google/models/${upstreamModelName}:predictLongRunning`,
+	);
+	const upstreamRequest = {
+		instances: [
+			{
+				prompt,
+			},
+		],
+		parameters: {
+			aspectRatio: getVertexAspectRatio(videoSize),
+			durationSeconds: 8,
+			generateAudio: true,
+			resolution: getVertexResolution(videoSize),
+			sampleCount: 1,
+		},
+	};
+	const rawResponse = await fetchUpstreamJson(upstreamUrl, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${providerContext.token}`,
+		},
+		body: JSON.stringify(upstreamRequest),
+	});
+	const upstreamId =
+		typeof rawResponse.name === "string" && rawResponse.name.length > 0
+			? rawResponse.name
+			: extractUpstreamVideoId(rawResponse);
+	if (!upstreamId) {
+		throw new HTTPException(502, {
+			message: "Google Vertex video response did not include an operation name",
+		});
+	}
+
+	return {
+		upstreamId,
+		upstreamResponse: addRequestedVideoMetadata(
+			{
+				...rawResponse,
+				name: upstreamId,
+				status: rawResponse.done === true ? "completed" : "queued",
+				duration: 8,
+				google_vertex_project_id: providerContext.vertexProjectId,
+				google_vertex_region: providerContext.vertexRegion,
+				google_vertex_model_name: upstreamModelName,
+			},
+			videoSize,
+		),
+	};
+}
+
 async function createUpstreamVideoJob(
 	providerContext: ProviderContext,
 	providerMapping: ProviderModelMapping,
@@ -1125,6 +1390,13 @@ async function createUpstreamVideoJob(
 			);
 		case "avalanche":
 			return await createAvalancheVideoJob(
+				providerContext,
+				providerMapping,
+				videoSize,
+				prompt,
+			);
+		case "google-vertex":
+			return await createGoogleVertexVideoJob(
 				providerContext,
 				providerMapping,
 				videoSize,
@@ -1259,8 +1531,21 @@ videos.openapi(getVideoContent, async (c) => {
 	}
 
 	if (!job.contentUrl) {
-		throw new HTTPException(404, {
-			message: "Video content is not available",
+		const inlineVideo = getGoogleVertexInlineVideo(job);
+		if (!inlineVideo) {
+			throw new HTTPException(404, {
+				message: "Video content is not available",
+			});
+		}
+
+		const bytes = Uint8Array.from(
+			Buffer.from(inlineVideo.bytesBase64Encoded, "base64"),
+		);
+		return new Response(bytes, {
+			status: 200,
+			headers: {
+				"Content-Type": inlineVideo.mimeType,
+			},
 		});
 	}
 

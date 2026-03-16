@@ -214,10 +214,22 @@ describe("Models API", () => {
 			const avalancheProvider = videoModel.providers.find(
 				(provider: any) => provider.providerId === "avalanche",
 			);
+			const googleVertexProvider = videoModel.providers.find(
+				(provider: any) => provider.providerId === "google-vertex",
+			);
 			expect(obsidianProvider?.pricing.per_second).toBeDefined();
 			expect(obsidianProvider?.supportedVideoSizes).toEqual([
 				"1280x720",
 				"720x1280",
+			]);
+			expect(googleVertexProvider?.pricing.per_second).toBeDefined();
+			expect(googleVertexProvider?.supportedVideoSizes).toEqual([
+				"1280x720",
+				"720x1280",
+				"1920x1080",
+				"1080x1920",
+				"3840x2160",
+				"2160x3840",
 			]);
 			expect(avalancheProvider?.pricing.per_second).toBeDefined();
 			expect(avalancheProvider?.supportedVideoSizes).toEqual([
