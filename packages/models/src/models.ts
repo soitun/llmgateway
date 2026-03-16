@@ -203,6 +203,10 @@ export interface ProviderModelMapping {
 	 * When true, requests are routed to a provider-specific video generation endpoint.
 	 */
 	videoGenerations?: boolean;
+	/**
+	 * Supported OpenAI-style video sizes in widthxheight format for this provider.
+	 */
+	supportedVideoSizes?: string[];
 }
 
 export type StabilityLevel = "stable" | "beta" | "unstable" | "experimental";

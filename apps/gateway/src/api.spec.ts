@@ -149,6 +149,88 @@ describe("test", () => {
 		});
 		expect(videoJob).toBeTruthy();
 		expect(videoJob?.upstreamId).toBe("video_1");
+		expect(videoJob?.usedModel).toBe("veo-3.1-landscape");
+		expect(
+			(videoJob?.upstreamCreateResponse as { size?: string } | null)?.size,
+		).toBe("1280x720");
+	});
+
+	test("/v1/videos rejects sizes that obsidian does not support", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "obsidian",
+			organizationId: "org-id",
+			baseUrl: mockServerUrl,
+		});
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1-fast-generate-preview",
+				prompt: "A race car on a mountain road",
+				size: "1920x1080",
+			}),
+		});
+
+		expect(res.status).toBe(400);
+		const json = await res.json();
+		expect(JSON.stringify(json)).toContain("1920x1080");
+		expect(JSON.stringify(json)).toContain("obsidian");
+	});
+
+	test("/v1/videos keeps portrait sizes on the default obsidian model", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "obsidian",
+			organizationId: "org-id",
+			baseUrl: mockServerUrl,
+		});
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1-generate-preview",
+				prompt: "A skateboarder landing a trick",
+				size: "720x1280",
+			}),
+		});
+
+		expect(res.status).toBe(200);
+
+		const json = await res.json();
+		const videoJob = await db.query.videoJob.findFirst({
+			where: { id: { eq: json.id } },
+		});
+		expect(videoJob?.usedModel).toBe("veo-3.1");
+		expect(
+			(videoJob?.upstreamCreateResponse as { size?: string } | null)?.size,
+		).toBe("720x1280");
 	});
 
 	test("/v1/videos supports retrieve and content for completed jobs", async () => {
@@ -211,7 +293,7 @@ describe("test", () => {
 		expect(await contentRes.text()).toBe(`mock-video-${videoJob!.upstreamId}`);
 
 		const logs = await db.query.log.findMany({
-			where: { usedModel: { eq: "veo-3.1" } },
+			where: { usedModel: { eq: "veo-3.1-landscape" } },
 		});
 		expect(logs).toHaveLength(1);
 		expect(logs[0].requestCost).toBe(0);
@@ -263,7 +345,7 @@ describe("test", () => {
 		await processPendingWebhookDeliveries();
 
 		const logs = await db.query.log.findMany({
-			where: { usedModel: { eq: "veo-3.1-fast" } },
+			where: { usedModel: { eq: "veo-3.1-fast-landscape" } },
 		});
 		expect(logs).toHaveLength(1);
 		expect(logs[0].requestCost).toBe(0);
@@ -367,6 +449,70 @@ describe("test", () => {
 		expect(res.status).toBe(400);
 		const json = await res.json();
 		expect(JSON.stringify(json)).toContain("seconds");
+	});
+
+	test("/v1/videos rejects unsupported size values", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1-generate-preview",
+				prompt: "A quiet forest at dawn",
+				size: "1080x1080",
+			}),
+		});
+
+		expect(res.status).toBe(400);
+		const json = await res.json();
+		expect(JSON.stringify(json)).toContain("size");
+		expect(JSON.stringify(json)).toContain("1280x720");
+	});
+
+	test("/v1/videos rejects 4k sizes when only obsidian is available", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "obsidian",
+			organizationId: "org-id",
+			baseUrl: mockServerUrl,
+		});
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1-generate-preview",
+				prompt: "An eagle flying over snowy peaks",
+				size: "3840x2160",
+			}),
+		});
+
+		expect(res.status).toBe(400);
+		const json = await res.json();
+		expect(JSON.stringify(json)).toContain("3840x2160");
+		expect(JSON.stringify(json)).toContain("obsidian");
 	});
 
 	test("/v1/videos requires at least $1 in available credits", async () => {

@@ -708,8 +708,8 @@ export const googleModels = [
 				requestPrice: undefined,
 				perSecondPrice: {
 					default: 0.4,
-					"4k": 0.6,
 				},
+				supportedVideoSizes: ["1280x720", "720x1280"],
 				contextSize: 32768,
 				maxOutput: 1,
 				streaming: false,
@@ -738,8 +738,8 @@ export const googleModels = [
 				requestPrice: undefined,
 				perSecondPrice: {
 					default: 0.15,
-					"4k": 0.35,
 				},
+				supportedVideoSizes: ["1280x720", "720x1280"],
 				contextSize: 32768,
 				maxOutput: 1,
 				streaming: false,

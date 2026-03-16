@@ -35,13 +35,23 @@ LLMGateway currently supports a focused subset of the OpenAI video API for Veo 3
 | ----------------- | ------ | -------- | ----------------------------------------------------- |
 | `model`           | string | yes      | Any video-capable model from the filtered models page |
 | `prompt`          | string | yes      | Text prompt for the video                             |
+| `size`            | string | no       | `widthxheight`, limited to the supported Veo sizes    |
 | `callback_url`    | string | no       | LLMGateway extension for completion webhooks          |
 | `callback_secret` | string | no       | LLMGateway extension used to sign webhook deliveries  |
+
+Supported `size` values for Veo 3.1:
+
+- `1280x720`
+- `720x1280`
+
+Current provider support:
+
+- `obsidian` currently supports only `1280x720` and `720x1280`
+- Requests for `1080p` or `4k` sizes return `400` until a provider with support is available
 
 ### Not supported yet
 
 - `input_reference`
-- `size`
 - `seconds`
 - `image`
 - multipart uploads
@@ -52,12 +62,12 @@ LLMGateway currently supports a focused subset of the OpenAI video API for Veo 3
 
 Video generation requires at least `$1.00` in available organization credits before the job is submitted upstream.
 
-Current pricing follows Google’s official paid-tier Veo 3.1 pricing:
+Current pricing for the supported Obsidian Veo 3.1 path:
 
-| Model                           | Default price    | 4K price         |
-| ------------------------------- | ---------------- | ---------------- |
-| `veo-3.1-generate-preview`      | `$0.40 / second` | `$0.60 / second` |
-| `veo-3.1-fast-generate-preview` | `$0.15 / second` | `$0.35 / second` |
+| Model                           | 720p price       |
+| ------------------------------- | ---------------- |
+| `veo-3.1-generate-preview`      | `$0.40 / second` |
+| `veo-3.1-fast-generate-preview` | `$0.15 / second` |
 
 ```bash
 curl -X POST "https://api.llmgateway.io/v1/videos" \
@@ -65,7 +75,8 @@ curl -X POST "https://api.llmgateway.io/v1/videos" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "veo-3.1-generate-preview",
-    "prompt": "A cinematic aerial shot flying above a rainforest waterfall at sunrise"
+    "prompt": "A cinematic aerial shot flying above a rainforest waterfall at sunrise",
+    "size": "1920x1080"
   }'
 ```
 

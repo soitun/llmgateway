@@ -32,6 +32,7 @@ const modelSchema = z.object({
 		z.object({
 			providerId: z.string(),
 			modelName: z.string(),
+			supportedVideoSizes: z.array(z.string()).optional(),
 			pricing: z
 				.object({
 					prompt: z.string(),
@@ -200,6 +201,7 @@ modelsApi.openapi(listModels, async (c) => {
 					return {
 						providerId: provider.providerId,
 						modelName: provider.modelName,
+						supportedVideoSizes: provider.supportedVideoSizes,
 						pricing:
 							provider.inputPrice !== undefined ||
 							provider.outputPrice !== undefined ||

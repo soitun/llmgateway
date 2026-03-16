@@ -142,6 +142,7 @@ interface MockVideoJobState {
 	model: string;
 	status: string;
 	progress: number;
+	size?: string;
 	duration?: number;
 	resolution?: string;
 	width?: number;
@@ -166,6 +167,59 @@ interface MockWebhookDelivery {
 const videoJobs = new Map<string, MockVideoJobState>();
 const webhookDeliveries: MockWebhookDelivery[] = [];
 const webhookStatuses = new Map<string, number>();
+
+function getMockVideoSizeMetadata(size: unknown): {
+	size: string;
+	resolution: string;
+	width: number;
+	height: number;
+} {
+	switch (size) {
+		case "720x1280":
+			return {
+				size,
+				resolution: "720p",
+				width: 720,
+				height: 1280,
+			};
+		case "1920x1080":
+			return {
+				size,
+				resolution: "1080p",
+				width: 1920,
+				height: 1080,
+			};
+		case "1080x1920":
+			return {
+				size,
+				resolution: "1080p",
+				width: 1080,
+				height: 1920,
+			};
+		case "3840x2160":
+			return {
+				size,
+				resolution: "4k",
+				width: 3840,
+				height: 2160,
+			};
+		case "2160x3840":
+			return {
+				size,
+				resolution: "4k",
+				width: 2160,
+				height: 3840,
+			};
+		case "1280x720":
+		default:
+			return {
+				size: "1280x720",
+				resolution: "720p",
+				width: 1280,
+				height: 720,
+			};
+	}
+}
 
 export function resetFailOnceCounter() {
 	failOnceCounter = 0;
@@ -369,16 +423,18 @@ mockOpenAIServer.post("/v1/videos", async (c) => {
 	const body = await c.req.json();
 	videoCounter++;
 	const id = `video_${videoCounter}`;
+	const videoSize = getMockVideoSizeMetadata(body.size);
 	const job: MockVideoJobState = {
 		id,
 		object: "video",
 		model: body.model ?? "veo-3.1",
 		status: "queued",
 		progress: 0,
+		size: videoSize.size,
 		duration: 8,
-		resolution: "1080p",
-		width: 1920,
-		height: 1080,
+		resolution: videoSize.resolution,
+		width: videoSize.width,
+		height: videoSize.height,
 		created_at: Math.floor(Date.now() / 1000),
 		completed_at: null,
 		expires_at: null,
@@ -424,6 +480,7 @@ mockOpenAIServer.get("/v1/videos/:id/content", async (c) => {
 	return c.json({
 		url: `${currentMockServerUrl}/mock-assets/${id}`,
 		mime_type: "video/mp4",
+		size: job.size,
 		duration: job.duration,
 		resolution: job.resolution,
 		width: job.width,

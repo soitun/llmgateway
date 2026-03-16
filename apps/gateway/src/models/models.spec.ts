@@ -209,6 +209,10 @@ describe("Models API", () => {
 			expect(videoModel.architecture.output_modalities).toEqual(["video"]);
 			expect(videoModel.pricing.per_second).toBeDefined();
 			expect(videoModel.providers[0].pricing.per_second).toBeDefined();
+			expect(videoModel.providers[0].supportedVideoSizes).toEqual([
+				"1280x720",
+				"720x1280",
+			]);
 		}
 	});
 

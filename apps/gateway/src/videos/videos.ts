@@ -24,6 +24,8 @@ import {
 	getProviderEnvValue,
 	hasProviderEnvironmentToken,
 	models,
+	type ModelDefinition,
+	type ProviderModelMapping,
 } from "@llmgateway/models";
 
 import type { ServerTypes } from "@/vars.js";
@@ -36,6 +38,55 @@ const TERMINAL_VIDEO_STATUSES = new Set([
 	"expired",
 ]);
 const MIN_VIDEO_GENERATION_BALANCE = 1;
+const DEFAULT_VIDEO_SIZE = "1280x720";
+const SUPPORTED_VEO_VIDEO_SIZES = {
+	"1280x720": {
+		size: "1280x720",
+		width: 1280,
+		height: 720,
+		resolution: "720p",
+		orientation: "landscape",
+	},
+	"720x1280": {
+		size: "720x1280",
+		width: 720,
+		height: 1280,
+		resolution: "720p",
+		orientation: "portrait",
+	},
+	"1920x1080": {
+		size: "1920x1080",
+		width: 1920,
+		height: 1080,
+		resolution: "1080p",
+		orientation: "landscape",
+	},
+	"1080x1920": {
+		size: "1080x1920",
+		width: 1080,
+		height: 1920,
+		resolution: "1080p",
+		orientation: "portrait",
+	},
+	"3840x2160": {
+		size: "3840x2160",
+		width: 3840,
+		height: 2160,
+		resolution: "4k",
+		orientation: "landscape",
+	},
+	"2160x3840": {
+		size: "2160x3840",
+		width: 2160,
+		height: 3840,
+		resolution: "4k",
+		orientation: "portrait",
+	},
+} as const;
+
+type SupportedVeoVideoSize = keyof typeof SUPPORTED_VEO_VIDEO_SIZES;
+type VideoSizeConfig =
+	(typeof SUPPORTED_VEO_VIDEO_SIZES)[SupportedVeoVideoSize];
 
 const createVideoRequestSchema = z
 	.object({
@@ -49,6 +100,11 @@ const createVideoRequestSchema = z
 			example:
 				"A cinematic drone shot flying through a neon-lit futuristic city at night",
 		}),
+		size: z.string().optional().openapi({
+			description:
+				"Output resolution in OpenAI widthxheight format. Veo 3.1 accepts Google-style widthxheight sizes, but provider support can be narrower. Obsidian currently supports 1280x720 and 720x1280 only.",
+			example: "1280x720",
+		}),
 		callback_url: z.string().url().optional().openapi({
 			description:
 				"LLMGateway extension. When set, a signed webhook is delivered after the job reaches a terminal state.",
@@ -60,7 +116,6 @@ const createVideoRequestSchema = z
 			example: "whsec_test_secret",
 		}),
 		input_reference: z.unknown().optional(),
-		size: z.unknown().optional(),
 		seconds: z.unknown().optional(),
 		n: z.number().int().optional(),
 		image: z.unknown().optional(),
@@ -86,12 +141,19 @@ const createVideoRequestSchema = z
 			});
 		}
 
-		for (const key of [
-			"input_reference",
-			"size",
-			"seconds",
-			"image",
-		] as const) {
+		if (
+			value.size !== undefined &&
+			!(value.size in SUPPORTED_VEO_VIDEO_SIZES)
+		) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message:
+					"size must be one of 1280x720, 720x1280, 1920x1080, 1080x1920, 3840x2160, or 2160x3840",
+				path: ["size"],
+			});
+		}
+
+		for (const key of ["input_reference", "seconds", "image"] as const) {
 			if (value[key] !== undefined) {
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
@@ -352,6 +414,94 @@ function getVideoModel(model: string): {
 		message:
 			"Unsupported video model. Only veo-3.1-generate-preview, veo-3.1-fast-generate-preview, and their obsidian/ prefixed variants are supported right now.",
 	});
+}
+
+function getVideoSizeConfig(size: string | undefined): VideoSizeConfig {
+	const normalizedSize = size ?? DEFAULT_VIDEO_SIZE;
+	return SUPPORTED_VEO_VIDEO_SIZES[normalizedSize as SupportedVeoVideoSize];
+}
+
+function getVideoProviderMapping(
+	modelInfo: ModelDefinition,
+	requestedProvider: string | undefined,
+	videoSize: VideoSizeConfig,
+): ProviderModelMapping {
+	const candidateProviders = modelInfo.providers.filter((provider) => {
+		if (!provider.videoGenerations) {
+			return false;
+		}
+
+		if (requestedProvider && provider.providerId !== requestedProvider) {
+			return false;
+		}
+
+		return true;
+	});
+
+	const matchingProviders = candidateProviders.filter((provider) => {
+		if (!provider.supportedVideoSizes?.length) {
+			return true;
+		}
+
+		return provider.supportedVideoSizes.includes(videoSize.size);
+	});
+
+	if (matchingProviders.length === 0) {
+		const providerLabel =
+			requestedProvider ??
+			candidateProviders.map((provider) => provider.providerId).join(", ") ??
+			"the available providers";
+		throw new HTTPException(400, {
+			message: `Requested size ${videoSize.size} is not supported for model ${modelInfo.id} on ${providerLabel}.`,
+		});
+	}
+
+	const providerMapping = matchingProviders.find(
+		(provider) => provider.providerId === "obsidian",
+	);
+	if (!providerMapping) {
+		throw new HTTPException(500, {
+			message: `No supported provider mapping available for model ${modelInfo.id}`,
+		});
+	}
+
+	return providerMapping;
+}
+
+function getObsidianVideoModelName(
+	baseModelName: string,
+	videoSize: VideoSizeConfig,
+): string {
+	if (videoSize.orientation === "landscape") {
+		return `${baseModelName}-landscape`;
+	}
+
+	return baseModelName;
+}
+
+function addRequestedVideoMetadata(
+	body: Record<string, unknown>,
+	videoSize: VideoSizeConfig,
+): Record<string, unknown> {
+	return {
+		...body,
+		size:
+			typeof body.size === "string" && body.size.length > 0
+				? body.size
+				: videoSize.size,
+		resolution:
+			typeof body.resolution === "string" && body.resolution.length > 0
+				? body.resolution
+				: videoSize.resolution,
+		width:
+			typeof body.width === "number" && Number.isFinite(body.width)
+				? body.width
+				: videoSize.width,
+		height:
+			typeof body.height === "number" && Number.isFinite(body.height)
+				? body.height
+				: videoSize.height,
+	};
 }
 
 async function resolveProviderContext(
@@ -724,6 +874,7 @@ videos.openapi(createVideo, async (c) => {
 	const { apiKey, project, organization, requestId } =
 		await requireRequestContext(c);
 	const { normalizedModel, requestedProvider } = getVideoModel(request.model);
+	const videoSize = getVideoSizeConfig(request.size);
 
 	if (getAvailableCredits(organization) < MIN_VIDEO_GENERATION_BALANCE) {
 		throw new HTTPException(402, {
@@ -752,33 +903,38 @@ videos.openapi(createVideo, async (c) => {
 		});
 	}
 
-	const providerMapping = modelInfo.providers.find(
-		(provider) => provider.providerId === "obsidian",
+	const providerMapping = getVideoProviderMapping(
+		modelInfo,
+		requestedProvider,
+		videoSize,
 	);
-	if (!providerMapping) {
-		throw new HTTPException(500, {
-			message: `No obsidian provider mapping available for model ${normalizedModel}`,
-		});
-	}
 
 	const providerContext = await resolveProviderContext(
 		project,
 		organization.id,
 	);
 	const upstreamUrl = joinUrl(providerContext.baseUrl, "/v1/videos");
+	const upstreamModelName = getObsidianVideoModelName(
+		providerMapping.modelName,
+		videoSize,
+	);
 	const upstreamRequest = {
-		model: providerMapping.modelName,
+		model: upstreamModelName,
 		prompt: request.prompt,
+		size: videoSize.size,
 	};
 
-	const upstreamResponse = await fetchUpstreamJson(upstreamUrl, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			...getProviderHeaders("obsidian", providerContext.token),
-		},
-		body: JSON.stringify(upstreamRequest),
-	});
+	const upstreamResponse = addRequestedVideoMetadata(
+		await fetchUpstreamJson(upstreamUrl, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				...getProviderHeaders("obsidian", providerContext.token),
+			},
+			body: JSON.stringify(upstreamRequest),
+		}),
+		videoSize,
+	);
 
 	const upstreamId = (() => {
 		for (const value of [
@@ -812,7 +968,7 @@ videos.openapi(createVideo, async (c) => {
 			model: normalizedModel,
 			requestedProvider: requestedProvider ?? null,
 			usedProvider: "obsidian",
-			usedModel: providerMapping.modelName,
+			usedModel: upstreamModelName,
 			providerToken: providerContext.token,
 			providerBaseUrl: providerContext.baseUrl,
 			upstreamId,
