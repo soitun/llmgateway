@@ -1,0 +1,885 @@
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { HTTPException } from "hono/http-exception";
+
+import { getProviderEnv } from "@/chat/tools/get-provider-env.js";
+import {
+	findApiKeyByToken,
+	findOrganizationById,
+	findProjectById,
+	findProviderKey,
+} from "@/lib/cached-queries.js";
+import { validateModelAccess } from "@/lib/iam.js";
+
+import { getProviderHeaders } from "@llmgateway/actions";
+import {
+	and,
+	db,
+	eq,
+	shortid,
+	tables,
+	type InferSelectModel,
+} from "@llmgateway/db";
+import { logger } from "@llmgateway/logger";
+import {
+	getProviderEnvValue,
+	hasProviderEnvironmentToken,
+	models,
+} from "@llmgateway/models";
+
+import type { ServerTypes } from "@/vars.js";
+import type { Context } from "hono";
+
+const TERMINAL_VIDEO_STATUSES = new Set([
+	"completed",
+	"failed",
+	"canceled",
+	"expired",
+]);
+const MIN_VIDEO_GENERATION_BALANCE = 1;
+
+const createVideoRequestSchema = z
+	.object({
+		model: z.string().default("veo-3.1").openapi({
+			description:
+				"The video generation model to use. Supported values: veo-3.1 or obsidian/veo-3.1.",
+			example: "veo-3.1",
+		}),
+		prompt: z.string().min(1).openapi({
+			description: "Text prompt describing the video to generate.",
+			example:
+				"A cinematic drone shot flying through a neon-lit futuristic city at night",
+		}),
+		callback_url: z.string().url().optional().openapi({
+			description:
+				"LLMGateway extension. When set, a signed webhook is delivered after the job reaches a terminal state.",
+			example: "https://example.com/webhooks/video",
+		}),
+		callback_secret: z.string().min(1).optional().openapi({
+			description:
+				"LLMGateway extension. Shared secret used to sign webhook deliveries with HMAC-SHA256.",
+			example: "whsec_test_secret",
+		}),
+		input_reference: z.unknown().optional(),
+		size: z.unknown().optional(),
+		seconds: z.unknown().optional(),
+		n: z.number().int().optional(),
+		image: z.unknown().optional(),
+	})
+	.superRefine((value, ctx) => {
+		const hasCallbackUrl = value.callback_url !== undefined;
+		const hasCallbackSecret = value.callback_secret !== undefined;
+
+		if (hasCallbackUrl !== hasCallbackSecret) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message:
+					"callback_url and callback_secret must either both be provided or both be omitted",
+				path: hasCallbackUrl ? ["callback_secret"] : ["callback_url"],
+			});
+		}
+
+		if (value.n !== undefined && value.n !== 1) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: "Only n=1 is supported for veo-3.1",
+				path: ["n"],
+			});
+		}
+
+		for (const key of [
+			"input_reference",
+			"size",
+			"seconds",
+			"image",
+		] as const) {
+			if (value[key] !== undefined) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `${key} is not supported for veo-3.1 yet`,
+					path: [key],
+				});
+			}
+		}
+	});
+
+const videoErrorSchema = z.object({
+	code: z.string().optional(),
+	message: z.string(),
+	details: z.unknown().optional(),
+});
+
+const videoContentSchema = z.array(
+	z.object({
+		type: z.literal("video"),
+		url: z.string().url(),
+		mime_type: z.string().nullable().optional(),
+	}),
+);
+
+const videoResponseSchema = z.object({
+	id: z.string(),
+	object: z.literal("video"),
+	model: z.string(),
+	status: z.enum([
+		"queued",
+		"in_progress",
+		"completed",
+		"failed",
+		"canceled",
+		"expired",
+	]),
+	progress: z.number().int().min(0).max(100).nullable(),
+	created_at: z.number(),
+	completed_at: z.number().nullable(),
+	expires_at: z.number().nullable(),
+	error: videoErrorSchema.nullable(),
+	content: videoContentSchema.optional(),
+});
+
+const createVideo = createRoute({
+	operationId: "v1_videos_create",
+	summary: "Create video",
+	description:
+		"Creates a new asynchronous video generation job using an OpenAI-compatible request format.",
+	method: "post",
+	path: "/",
+	security: [
+		{
+			bearerAuth: [],
+		},
+	],
+	request: {
+		body: {
+			content: {
+				"application/json": {
+					schema: createVideoRequestSchema,
+				},
+			},
+		},
+	},
+	responses: {
+		200: {
+			content: {
+				"application/json": {
+					schema: videoResponseSchema,
+				},
+			},
+			description: "Video job created.",
+		},
+	},
+});
+
+const getVideo = createRoute({
+	operationId: "v1_videos_retrieve",
+	summary: "Retrieve video",
+	description: "Retrieves the current state of a video generation job.",
+	method: "get",
+	path: "/{video_id}",
+	security: [
+		{
+			bearerAuth: [],
+		},
+	],
+	request: {
+		params: z.object({
+			video_id: z.string(),
+		}),
+	},
+	responses: {
+		200: {
+			content: {
+				"application/json": {
+					schema: videoResponseSchema,
+				},
+			},
+			description: "Video job state.",
+		},
+	},
+});
+
+const getVideoContent = createRoute({
+	operationId: "v1_videos_content",
+	summary: "Video content",
+	description:
+		"Streams the generated video content once the job has completed successfully.",
+	method: "get",
+	path: "/{video_id}/content",
+	security: [
+		{
+			bearerAuth: [],
+		},
+	],
+	request: {
+		params: z.object({
+			video_id: z.string(),
+		}),
+	},
+	responses: {
+		200: {
+			content: {
+				"video/mp4": {
+					schema: z.any(),
+				},
+				"application/octet-stream": {
+					schema: z.any(),
+				},
+			},
+			description: "Video bytes.",
+		},
+	},
+});
+
+type VideoJobRecord = InferSelectModel<typeof tables.videoJob>;
+
+interface RequestContext {
+	apiKey: InferSelectModel<typeof tables.apiKey>;
+	project: InferSelectModel<typeof tables.project>;
+	organization: InferSelectModel<typeof tables.organization>;
+	requestId: string;
+}
+
+interface ProviderContext {
+	baseUrl: string;
+	token: string;
+	usedMode: "api-keys" | "credits";
+}
+
+function getAvailableCredits(
+	organization: InferSelectModel<typeof tables.organization>,
+): number {
+	const regularCredits = parseFloat(organization.credits ?? "0");
+	const devPlanCreditsRemaining =
+		organization.devPlan !== "none"
+			? parseFloat(organization.devPlanCreditsLimit ?? "0") -
+				parseFloat(organization.devPlanCreditsUsed ?? "0")
+			: 0;
+	return regularCredits + devPlanCreditsRemaining;
+}
+
+function extractToken(c: Context): string {
+	const auth = c.req.header("Authorization");
+	const xApiKey = c.req.header("x-api-key");
+
+	if (auth) {
+		const split = auth.split("Bearer ");
+		if (split.length === 2 && split[1]) {
+			return split[1];
+		}
+	}
+
+	if (xApiKey) {
+		return xApiKey;
+	}
+
+	throw new HTTPException(401, {
+		message:
+			"Unauthorized: No API key provided. Expected 'Authorization: Bearer your-api-token' header or 'x-api-key: your-api-token' header",
+	});
+}
+
+async function requireRequestContext(c: Context): Promise<RequestContext> {
+	const token = extractToken(c);
+	const apiKey = await findApiKeyByToken(token);
+
+	if (!apiKey || apiKey.status !== "active") {
+		throw new HTTPException(401, {
+			message:
+				"Unauthorized: Invalid LLMGateway API token. Please make sure the token is not deleted or disabled. Go to the LLMGateway 'API Keys' page to generate a new token.",
+		});
+	}
+
+	if (apiKey.usageLimit && Number(apiKey.usage) >= Number(apiKey.usageLimit)) {
+		throw new HTTPException(401, {
+			message: "Unauthorized: LLMGateway API key reached its usage limit.",
+		});
+	}
+
+	const project = await findProjectById(apiKey.projectId);
+	if (!project) {
+		throw new HTTPException(500, {
+			message: "Could not find project",
+		});
+	}
+
+	if (project.status === "deleted") {
+		throw new HTTPException(410, {
+			message: "Project has been archived and is no longer accessible",
+		});
+	}
+
+	const organization = await findOrganizationById(project.organizationId);
+	if (!organization) {
+		throw new HTTPException(500, {
+			message: "Could not find organization",
+		});
+	}
+
+	return {
+		apiKey,
+		project,
+		organization,
+		requestId: c.req.header("x-request-id") ?? shortid(40),
+	};
+}
+
+function getVideoModel(model: string): {
+	normalizedModel: string;
+	requestedProvider: string | undefined;
+} {
+	if (model === "veo-3.1") {
+		return {
+			normalizedModel: "veo-3.1",
+			requestedProvider: undefined,
+		};
+	}
+
+	if (model === "obsidian/veo-3.1") {
+		return {
+			normalizedModel: "veo-3.1",
+			requestedProvider: "obsidian",
+		};
+	}
+
+	throw new HTTPException(400, {
+		message:
+			"Unsupported video model. Only veo-3.1 and obsidian/veo-3.1 are supported right now.",
+	});
+}
+
+async function resolveProviderContext(
+	project: InferSelectModel<typeof tables.project>,
+	organizationId: string,
+): Promise<ProviderContext> {
+	if (project.mode === "api-keys") {
+		const providerKey = await findProviderKey(organizationId, "obsidian");
+		if (!providerKey) {
+			throw new HTTPException(400, {
+				message:
+					"No API key set for provider: obsidian. Please add a provider key in your settings or add credits and switch to credits or hybrid mode.",
+			});
+		}
+
+		const baseUrl =
+			providerKey.baseUrl ?? getProviderEnvValue("obsidian", "baseUrl");
+		if (!baseUrl) {
+			throw new HTTPException(400, {
+				message: "No base URL set for provider: obsidian",
+			});
+		}
+
+		return {
+			baseUrl,
+			token: providerKey.token,
+			usedMode: "api-keys",
+		};
+	}
+
+	if (project.mode === "credits") {
+		const env = getProviderEnv("obsidian");
+		const baseUrl = getProviderEnvValue("obsidian", "baseUrl", env.configIndex);
+		if (!baseUrl) {
+			throw new HTTPException(500, {
+				message:
+					"LLM_OBSIDIAN_BASE_URL environment variable is required for obsidian provider",
+			});
+		}
+
+		return {
+			baseUrl,
+			token: env.token,
+			usedMode: "credits",
+		};
+	}
+
+	const providerKey = await findProviderKey(organizationId, "obsidian");
+	if (providerKey) {
+		const baseUrl =
+			providerKey.baseUrl ?? getProviderEnvValue("obsidian", "baseUrl");
+		if (!baseUrl) {
+			throw new HTTPException(400, {
+				message: "No base URL set for provider: obsidian",
+			});
+		}
+
+		return {
+			baseUrl,
+			token: providerKey.token,
+			usedMode: "api-keys",
+		};
+	}
+
+	if (!hasProviderEnvironmentToken("obsidian")) {
+		throw new HTTPException(400, {
+			message:
+				"No provider key set for any of the providers that support model veo-3.1. Please add the provider key in the settings or switch the project mode to credits or hybrid.",
+		});
+	}
+
+	const env = getProviderEnv("obsidian");
+	const baseUrl = getProviderEnvValue("obsidian", "baseUrl", env.configIndex);
+	if (!baseUrl) {
+		throw new HTTPException(500, {
+			message:
+				"LLM_OBSIDIAN_BASE_URL environment variable is required for obsidian provider",
+		});
+	}
+
+	return {
+		baseUrl,
+		token: env.token,
+		usedMode: "credits",
+	};
+}
+
+function joinUrl(baseUrl: string, path: string): string {
+	const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+	const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
+	return new URL(normalizedPath, normalizedBaseUrl).toString();
+}
+
+function normalizeVideoStatus(value: unknown): VideoJobRecord["status"] {
+	if (typeof value !== "string") {
+		return "queued";
+	}
+
+	switch (value.toLowerCase()) {
+		case "queued":
+		case "pending":
+			return "queued";
+		case "in_progress":
+		case "in-progress":
+		case "processing":
+		case "running":
+			return "in_progress";
+		case "completed":
+		case "succeeded":
+		case "success":
+			return "completed";
+		case "failed":
+		case "error":
+			return "failed";
+		case "canceled":
+		case "cancelled":
+			return "canceled";
+		case "expired":
+			return "expired";
+		default:
+			return "queued";
+	}
+}
+
+function parseTimestamp(value: unknown): Date | null {
+	if (value instanceof Date) {
+		return value;
+	}
+
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return new Date(value > 1_000_000_000_000 ? value : value * 1000);
+	}
+
+	if (typeof value === "string" && value.length > 0) {
+		const asNumber = Number(value);
+		if (!Number.isNaN(asNumber)) {
+			return new Date(
+				asNumber > 1_000_000_000_000 ? asNumber : asNumber * 1000,
+			);
+		}
+
+		const parsed = new Date(value);
+		if (!Number.isNaN(parsed.getTime())) {
+			return parsed;
+		}
+	}
+
+	return null;
+}
+
+function extractProgress(body: Record<string, unknown>): number {
+	const candidates = [
+		body.progress,
+		body.progress_percent,
+		body.progressPercentage,
+		body.data && typeof body.data === "object"
+			? (body.data as Record<string, unknown>).progress
+			: undefined,
+	];
+
+	for (const candidate of candidates) {
+		if (typeof candidate === "number" && Number.isFinite(candidate)) {
+			return Math.max(0, Math.min(100, Math.round(candidate)));
+		}
+		if (typeof candidate === "string" && candidate.length > 0) {
+			const parsed = Number(candidate);
+			if (!Number.isNaN(parsed)) {
+				return Math.max(0, Math.min(100, Math.round(parsed)));
+			}
+		}
+	}
+
+	return 0;
+}
+
+function extractContentUrl(body: Record<string, unknown>): string | null {
+	const candidates = [
+		body.url,
+		body.video_url,
+		body.output_url,
+		body.content,
+		body.output,
+	];
+
+	for (const candidate of candidates) {
+		if (typeof candidate === "string" && candidate.startsWith("http")) {
+			return candidate;
+		}
+
+		if (Array.isArray(candidate)) {
+			for (const item of candidate) {
+				if (
+					item &&
+					typeof item === "object" &&
+					"url" in item &&
+					typeof item.url === "string"
+				) {
+					return item.url;
+				}
+			}
+		}
+
+		if (candidate && typeof candidate === "object") {
+			const obj = candidate as Record<string, unknown>;
+			if (typeof obj.url === "string") {
+				return obj.url;
+			}
+		}
+	}
+
+	return null;
+}
+
+function extractError(body: Record<string, unknown>): VideoJobRecord["error"] {
+	const candidate =
+		body.error && typeof body.error === "object"
+			? (body.error as Record<string, unknown>)
+			: undefined;
+
+	if (!candidate) {
+		return null;
+	}
+
+	return {
+		code: typeof candidate.code === "string" ? candidate.code : undefined,
+		message:
+			typeof candidate.message === "string"
+				? candidate.message
+				: "Video generation failed",
+		details: candidate,
+	};
+}
+
+function toUnixTimestamp(value: Date | null): number | null {
+	return value ? Math.floor(value.getTime() / 1000) : null;
+}
+
+function serializeVideoJob(job: VideoJobRecord) {
+	return {
+		id: job.id,
+		object: "video" as const,
+		model: job.model,
+		status: job.status,
+		progress: TERMINAL_VIDEO_STATUSES.has(job.status)
+			? job.status === "completed"
+				? 100
+				: job.progress
+			: job.progress,
+		created_at: Math.floor(job.createdAt.getTime() / 1000),
+		completed_at: toUnixTimestamp(job.completedAt),
+		expires_at: toUnixTimestamp(job.expiresAt),
+		error: job.error ?? null,
+		content: job.contentUrl
+			? [
+					{
+						type: "video" as const,
+						url: job.contentUrl,
+						mime_type: job.contentType ?? null,
+					},
+				]
+			: undefined,
+	};
+}
+
+async function requireVideoJobForProject(
+	projectId: string,
+	videoId: string,
+): Promise<VideoJobRecord> {
+	const job = await db
+		.select()
+		.from(tables.videoJob)
+		.where(
+			and(
+				eq(tables.videoJob.id, videoId),
+				eq(tables.videoJob.projectId, projectId),
+			),
+		)
+		.limit(1)
+		.then((rows) => rows[0]);
+
+	if (!job) {
+		throw new HTTPException(404, {
+			message: "Video not found",
+		});
+	}
+
+	return job;
+}
+
+async function parseJsonBody(
+	c: Context,
+): Promise<z.infer<typeof createVideoRequestSchema>> {
+	let rawBody: unknown;
+	try {
+		rawBody = await c.req.json();
+	} catch {
+		throw new HTTPException(400, {
+			message: "Invalid JSON in request body",
+		});
+	}
+
+	const validationResult = createVideoRequestSchema.safeParse(rawBody);
+	if (!validationResult.success) {
+		throw new HTTPException(400, {
+			message: `Invalid request parameters: ${validationResult.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join(", ")}`,
+		});
+	}
+
+	return validationResult.data;
+}
+
+async function fetchUpstreamJson(
+	url: string,
+	init: RequestInit,
+): Promise<Record<string, unknown>> {
+	const response = await fetch(url, init);
+	const text = await response.text();
+	let body: Record<string, unknown> = {};
+
+	if (text.length > 0) {
+		try {
+			body = JSON.parse(text) as Record<string, unknown>;
+		} catch {
+			body = {
+				error: {
+					message: text,
+				},
+			};
+		}
+	}
+
+	if (!response.ok) {
+		logger.warn("Upstream video request failed", {
+			url,
+			status: response.status,
+			body,
+		});
+		throw new HTTPException(
+			response.status as
+				| 400
+				| 401
+				| 403
+				| 404
+				| 409
+				| 422
+				| 429
+				| 500
+				| 502
+				| 503
+				| 504,
+			{
+				message:
+					typeof body.error === "object" &&
+					body.error &&
+					"message" in body.error &&
+					typeof body.error.message === "string"
+						? body.error.message
+						: `Upstream provider error (${response.status})`,
+			},
+		);
+	}
+
+	return body;
+}
+
+export const videos = new OpenAPIHono<ServerTypes>();
+
+videos.openapi(createVideo, async (c) => {
+	const request = await parseJsonBody(c);
+	const { apiKey, project, organization, requestId } =
+		await requireRequestContext(c);
+	const { normalizedModel, requestedProvider } = getVideoModel(request.model);
+
+	if (getAvailableCredits(organization) < MIN_VIDEO_GENERATION_BALANCE) {
+		throw new HTTPException(402, {
+			message:
+				"Video generation requires at least $1.00 in available credits. Please add credits and try again.",
+		});
+	}
+
+	const modelInfo = models.find((model) => model.id === normalizedModel);
+	if (!modelInfo) {
+		throw new HTTPException(400, {
+			message: `Model ${normalizedModel} not found`,
+		});
+	}
+
+	const iamValidation = await validateModelAccess(
+		apiKey.id,
+		normalizedModel,
+		requestedProvider,
+		modelInfo,
+	);
+
+	if (!iamValidation.allowed) {
+		throw new HTTPException(403, {
+			message: iamValidation.reason ?? "Access to this model is not allowed",
+		});
+	}
+
+	const providerContext = await resolveProviderContext(
+		project,
+		organization.id,
+	);
+	const upstreamUrl = joinUrl(providerContext.baseUrl, "/v1/videos");
+	const upstreamRequest = {
+		model: normalizedModel,
+		prompt: request.prompt,
+	};
+
+	const upstreamResponse = await fetchUpstreamJson(upstreamUrl, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			...getProviderHeaders("obsidian", providerContext.token),
+		},
+		body: JSON.stringify(upstreamRequest),
+	});
+
+	const upstreamId = (() => {
+		for (const value of [
+			upstreamResponse.id,
+			upstreamResponse.video_id,
+			upstreamResponse.job_id,
+		]) {
+			if (typeof value === "string" && value.length > 0) {
+				return value;
+			}
+		}
+		return null;
+	})();
+
+	if (!upstreamId) {
+		throw new HTTPException(502, {
+			message: "Upstream video response did not include an id",
+		});
+	}
+
+	const initialStatus = normalizeVideoStatus(upstreamResponse.status);
+	const created = await db
+		.insert(tables.videoJob)
+		.values({
+			requestId,
+			organizationId: organization.id,
+			projectId: project.id,
+			apiKeyId: apiKey.id,
+			mode: project.mode,
+			usedMode: providerContext.usedMode,
+			model: normalizedModel,
+			requestedProvider: requestedProvider ?? null,
+			usedProvider: "obsidian",
+			usedModel: "veo-3.1",
+			providerToken: providerContext.token,
+			providerBaseUrl: providerContext.baseUrl,
+			upstreamId,
+			prompt: request.prompt,
+			status: initialStatus,
+			progress: extractProgress(upstreamResponse),
+			error: extractError(upstreamResponse),
+			contentUrl: extractContentUrl(upstreamResponse),
+			contentType:
+				typeof upstreamResponse.mime_type === "string"
+					? upstreamResponse.mime_type
+					: "video/mp4",
+			completedAt: parseTimestamp(upstreamResponse.completed_at),
+			expiresAt: parseTimestamp(upstreamResponse.expires_at),
+			lastPolledAt: null,
+			nextPollAt: new Date(),
+			pollAttemptCount: 0,
+			callbackUrl: request.callback_url ?? null,
+			callbackSecret: request.callback_secret ?? null,
+			callbackStatus: request.callback_url ? "pending" : "none",
+			upstreamCreateResponse: upstreamResponse,
+			upstreamStatusResponse: upstreamResponse,
+		})
+		.returning()
+		.then((rows) => rows[0]);
+
+	logger.info("Created video job", {
+		videoId: created.id,
+		upstreamId,
+		projectId: project.id,
+		organizationId: organization.id,
+		model: normalizedModel,
+		usedProvider: "obsidian",
+	});
+
+	return c.json(serializeVideoJob(created));
+});
+
+videos.openapi(getVideo, async (c) => {
+	const { project } = await requireRequestContext(c);
+	const { video_id: videoId } = c.req.valid("param");
+	const job = await requireVideoJobForProject(project.id, videoId);
+	return c.json(serializeVideoJob(job));
+});
+
+videos.openapi(getVideoContent, async (c) => {
+	const { project } = await requireRequestContext(c);
+	const { video_id: videoId } = c.req.valid("param");
+	const job = await requireVideoJobForProject(project.id, videoId);
+
+	if (job.status !== "completed") {
+		throw new HTTPException(409, {
+			message: `Video is not ready yet. Current status: ${job.status}`,
+		});
+	}
+
+	if (!job.contentUrl) {
+		throw new HTTPException(404, {
+			message: "Video content is not available",
+		});
+	}
+
+	const upstreamResponse = await fetch(job.contentUrl);
+	if (!upstreamResponse.ok || !upstreamResponse.body) {
+		throw new HTTPException(502, {
+			message: "Failed to fetch video content from upstream provider",
+		});
+	}
+
+	const headers = new Headers();
+	headers.set(
+		"Content-Type",
+		upstreamResponse.headers.get("Content-Type") ??
+			job.contentType ??
+			"video/mp4",
+	);
+
+	const contentLength = upstreamResponse.headers.get("Content-Length");
+	if (contentLength) {
+		headers.set("Content-Length", contentLength);
+	}
+
+	return new Response(upstreamResponse.body, {
+		status: 200,
+		headers,
+	});
+});

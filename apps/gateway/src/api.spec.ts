@@ -7,13 +7,21 @@ import {
 	test,
 	vi,
 } from "vitest";
+import {
+	processPendingVideoJobs,
+	processPendingWebhookDeliveries,
+} from "worker";
 
-import { db, tables } from "@llmgateway/db";
+import { db, eq, tables } from "@llmgateway/db";
 
 import { app } from "./app.js";
 import {
+	getMockWebhookDeliveries,
+	resetMockVideoState,
 	startMockServer,
 	stopMockServer,
+	setMockVideoStatus,
+	setMockWebhookStatus,
 } from "./test-utils/mock-openai-server.js";
 import { clearCache, waitForLogs, readAll } from "./test-utils/test-helpers.js";
 
@@ -34,9 +42,12 @@ describe("test", () => {
 
 	beforeEach(async () => {
 		await clearCache();
+		resetMockVideoState();
 
 		await Promise.all([
 			db.delete(tables.log),
+			db.delete(tables.webhookDeliveryLog),
+			db.delete(tables.videoJob),
 			db.delete(tables.apiKey),
 			db.delete(tables.providerKey),
 		]);
@@ -95,6 +106,303 @@ describe("test", () => {
 		expect(data.health).toHaveProperty("status");
 		expect(data.health).toHaveProperty("redis");
 		expect(data.health).toHaveProperty("database");
+	});
+
+	test("/v1/videos creates an async video job", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "obsidian",
+			organizationId: "org-id",
+			baseUrl: mockServerUrl,
+		});
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1",
+				prompt: "A robot dancing in the rain",
+			}),
+		});
+
+		expect(res.status).toBe(200);
+
+		const json = await res.json();
+		expect(json.object).toBe("video");
+		expect(json.model).toBe("veo-3.1");
+		expect(json.status).toBe("queued");
+
+		const videoJob = await db.query.videoJob.findFirst({
+			where: { id: { eq: json.id } },
+		});
+		expect(videoJob).toBeTruthy();
+		expect(videoJob?.upstreamId).toBe("video_1");
+	});
+
+	test("/v1/videos supports retrieve and content for completed jobs", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "obsidian",
+			organizationId: "org-id",
+			baseUrl: mockServerUrl,
+		});
+
+		const createRes = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "obsidian/veo-3.1",
+				prompt: "A cinematic sunset over mountains",
+			}),
+		});
+
+		expect(createRes.status).toBe(200);
+		const created = await createRes.json();
+
+		const videoJob = await db.query.videoJob.findFirst({
+			where: { id: { eq: created.id } },
+		});
+		expect(videoJob).toBeTruthy();
+
+		setMockVideoStatus(videoJob!.upstreamId, "completed");
+		await processPendingVideoJobs();
+
+		const getRes = await app.request(`/v1/videos/${created.id}`, {
+			headers: {
+				Authorization: "Bearer real-token",
+			},
+		});
+		expect(getRes.status).toBe(200);
+		const jobJson = await getRes.json();
+		expect(jobJson.status).toBe("completed");
+		expect(jobJson.content[0].type).toBe("video");
+
+		const contentRes = await app.request(`/v1/videos/${created.id}/content`, {
+			headers: {
+				Authorization: "Bearer real-token",
+			},
+		});
+		expect(contentRes.status).toBe(200);
+		expect(contentRes.headers.get("content-type")).toContain("video/mp4");
+		expect(await contentRes.text()).toBe(`mock-video-${videoJob!.upstreamId}`);
+
+		const logs = await db.query.log.findMany({
+			where: { usedModel: { eq: "veo-3.1" } },
+		});
+		expect(logs).toHaveLength(1);
+		expect(logs[0].requestCost).toBe(0.25);
+		expect(logs[0].cost).toBe(0.25);
+	});
+
+	test("/v1/videos delivers signed callbacks after completion", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "obsidian",
+			organizationId: "org-id",
+			baseUrl: mockServerUrl,
+		});
+
+		const createRes = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1",
+				prompt: "A whale swimming through clouds",
+				callback_url: `${mockServerUrl}/mock-callback/video-job`,
+				callback_secret: "whsec_test",
+			}),
+		});
+
+		expect(createRes.status).toBe(200);
+		const created = await createRes.json();
+
+		const videoJob = await db.query.videoJob.findFirst({
+			where: { id: { eq: created.id } },
+		});
+		expect(videoJob).toBeTruthy();
+
+		setMockVideoStatus(videoJob!.upstreamId, "completed");
+		await processPendingVideoJobs();
+		await processPendingWebhookDeliveries();
+
+		const deliveries = getMockWebhookDeliveries("video-job");
+		expect(deliveries).toHaveLength(1);
+		expect(deliveries[0].headers["webhook-id"]).toBe(`evt_${created.id}`);
+		expect(deliveries[0].headers["webhook-timestamp"]).toBeTruthy();
+		expect(deliveries[0].headers["webhook-signature"]).toMatch(/^v1,/);
+		expect((deliveries[0].body as { type: string }).type).toBe(
+			"video.completed",
+		);
+
+		const callbackLogs = await db.query.webhookDeliveryLog.findMany({});
+		expect(callbackLogs).toHaveLength(1);
+		expect(callbackLogs[0].status).toBe("delivered");
+	});
+
+	test("/v1/videos persists callback retries with exponential backoff", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "obsidian",
+			organizationId: "org-id",
+			baseUrl: mockServerUrl,
+		});
+
+		setMockWebhookStatus("retry-video", 500);
+
+		const createRes = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1",
+				prompt: "A spaceship landing on Mars",
+				callback_url: `${mockServerUrl}/mock-callback/retry-video`,
+				callback_secret: "whsec_retry",
+			}),
+		});
+
+		expect(createRes.status).toBe(200);
+		const created = await createRes.json();
+
+		const videoJob = await db.query.videoJob.findFirst({
+			where: { id: { eq: created.id } },
+		});
+		expect(videoJob).toBeTruthy();
+
+		setMockVideoStatus(videoJob!.upstreamId, "completed");
+		await processPendingVideoJobs();
+		await processPendingWebhookDeliveries();
+
+		const callbackLogs = await db.query.webhookDeliveryLog.findMany({
+			orderBy: {
+				attempt: "asc",
+			},
+		});
+		expect(callbackLogs).toHaveLength(2);
+		expect(callbackLogs[0].status).toBe("retrying");
+		expect(callbackLogs[1].status).toBe("pending");
+		expect(callbackLogs[1].attempt).toBe(2);
+		expect(callbackLogs[1].nextRetryAt.getTime()).toBeGreaterThan(
+			callbackLogs[0].createdAt.getTime(),
+		);
+	});
+
+	test("/v1/videos rejects unsupported OpenAI video parameters", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1",
+				prompt: "A fast moving train in the desert",
+				seconds: 8,
+			}),
+		});
+
+		expect(res.status).toBe(400);
+		const json = await res.json();
+		expect(JSON.stringify(json)).toContain("seconds");
+	});
+
+	test("/v1/videos requires at least $1 in available credits", async () => {
+		await db
+			.update(tables.organization)
+			.set({
+				credits: "0.50",
+			})
+			.where(eq(tables.organization.id, "org-id"));
+
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		await db.insert(tables.providerKey).values({
+			id: "provider-key-id",
+			token: "sk-test-key",
+			provider: "obsidian",
+			organizationId: "org-id",
+			baseUrl: mockServerUrl,
+		});
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1",
+				prompt: "A waterfall in slow motion",
+			}),
+		});
+
+		expect(res.status).toBe(402);
+		const json = await res.json();
+		expect(JSON.stringify(json)).toContain("$1.00");
+
+		const videoJobs = await db.query.videoJob.findMany({});
+		expect(videoJobs).toHaveLength(0);
 	});
 
 	test("/v1/chat/completions e2e success", async () => {

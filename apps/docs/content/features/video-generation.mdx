@@ -1,0 +1,175 @@
+---
+title: Video Generation
+description: Generate videos with an OpenAI-compatible async API and signed completion callbacks
+icon: Video
+---
+
+# Video Generation
+
+LLMGateway supports asynchronous video generation through an OpenAI-compatible `POST /v1/videos` flow.
+
+The first supported model is `veo-3.1` on the `obsidian` provider.
+
+## What Works Today
+
+- `POST /v1/videos`
+- `GET /v1/videos/{video_id}`
+- `GET /v1/videos/{video_id}/content`
+- Optional signed callbacks with `callback_url` and `callback_secret`
+
+## Supported Models
+
+- `veo-3.1`
+- `obsidian/veo-3.1`
+
+Both names resolve to the same upstream model. Use the provider-prefixed form if you want to pin the request explicitly to Obsidian.
+
+## Request Format
+
+LLMGateway currently supports a focused subset of the OpenAI video API for `veo-3.1`.
+
+### Supported fields
+
+| Field             | Type   | Required | Description                                          |
+| ----------------- | ------ | -------- | ---------------------------------------------------- |
+| `model`           | string | yes      | `veo-3.1` or `obsidian/veo-3.1`                      |
+| `prompt`          | string | yes      | Text prompt for the video                            |
+| `callback_url`    | string | no       | LLMGateway extension for completion webhooks         |
+| `callback_secret` | string | no       | LLMGateway extension used to sign webhook deliveries |
+
+### Not supported yet
+
+- `input_reference`
+- `size`
+- `seconds`
+- `image`
+- multipart uploads
+- `n` values other than `1`
+- remix/list/delete video endpoints
+
+## Create a Video
+
+Video generation requires at least `$1.00` in available organization credits before the job is submitted upstream.
+
+```bash
+curl -X POST "https://api.llmgateway.io/v1/videos" \
+  -H "Authorization: Bearer $LLM_GATEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "veo-3.1",
+    "prompt": "A cinematic aerial shot flying above a rainforest waterfall at sunrise"
+  }'
+```
+
+Example response:
+
+```json
+{
+	"id": "v_123",
+	"object": "video",
+	"model": "veo-3.1",
+	"status": "queued",
+	"progress": 0,
+	"created_at": 1773600000,
+	"completed_at": null,
+	"expires_at": null,
+	"error": null
+}
+```
+
+## Retrieve Job Status
+
+```bash
+curl "https://api.llmgateway.io/v1/videos/v_123" \
+  -H "Authorization: Bearer $LLM_GATEWAY_API_KEY"
+```
+
+Typical statuses:
+
+- `queued`
+- `in_progress`
+- `completed`
+- `failed`
+- `canceled`
+- `expired`
+
+## Download the Video
+
+Once the job is complete, stream the resulting video bytes from the content endpoint:
+
+```bash
+curl "https://api.llmgateway.io/v1/videos/v_123/content" \
+  -H "Authorization: Bearer $LLM_GATEWAY_API_KEY" \
+  --output video.mp4
+```
+
+## Signed Callbacks
+
+LLMGateway can notify your application when the job reaches a terminal state.
+
+```bash
+curl -X POST "https://api.llmgateway.io/v1/videos" \
+  -H "Authorization: Bearer $LLM_GATEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "veo-3.1",
+    "prompt": "A slow-motion close-up of waves crashing against black volcanic rock",
+    "callback_url": "https://example.com/webhooks/video",
+    "callback_secret": "whsec_your_secret_here"
+  }'
+```
+
+### Delivery behavior
+
+- Callbacks are sent only for terminal states in v1
+- Event types are `video.completed` and `video.failed`
+- Deliveries retry with exponential backoff on network errors, timeouts, and non-2xx responses
+- Each attempt is recorded internally in the webhook delivery log table
+
+### Headers
+
+- `webhook-id`
+- `webhook-timestamp`
+- `webhook-signature`
+
+### Signature format
+
+LLMGateway signs the string:
+
+```text
+{webhook-id}.{webhook-timestamp}.{raw-request-body}
+```
+
+using HMAC-SHA256 with your `callback_secret`, then sends:
+
+```text
+webhook-signature: v1,{base64_signature}
+```
+
+### Verification example
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verifyWebhook(
+	body: string,
+	webhookId: string,
+	webhookTimestamp: string,
+	webhookSignature: string,
+	secret: string,
+) {
+	const expected = createHmac("sha256", secret)
+		.update(`${webhookId}.${webhookTimestamp}.${body}`)
+		.digest("base64");
+
+	const provided = webhookSignature.replace(/^v1,/, "");
+
+	return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+}
+```
+
+## Related Docs
+
+- [Image Generation](/features/image-generation)
+- [Routing](/features/routing)
+- [Models API](/v1_models)

@@ -701,6 +701,13 @@
       "when": 1773263792063,
       "tag": "1773263792_boring_luminals",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "8",
+      "when": 1773667467172,
+      "tag": "1773667467_aromatic_luminals",
+      "breakpoints": true
     }
   ]
 }

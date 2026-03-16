@@ -192,6 +192,19 @@ describe("Models API", () => {
 		]);
 	});
 
+	test("GET /v1/models should include proper output modalities for veo-3.1", async () => {
+		const res = await app.request("/v1/models?include_deactivated=true");
+		expect(res.status).toBe(200);
+
+		const json = await res.json();
+
+		const videoModel = json.data.find((model: any) => model.id === "veo-3.1");
+
+		expect(videoModel).toBeDefined();
+		expect(videoModel.architecture.input_modalities).toEqual(["text"]);
+		expect(videoModel.architecture.output_modalities).toEqual(["video"]);
+	});
+
 	test("GET /v1/models should include stability information for models", async () => {
 		const res = await app.request("/v1/models?include_deactivated=true");
 		expect(res.status).toBe(200);

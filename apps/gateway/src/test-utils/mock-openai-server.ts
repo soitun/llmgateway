@@ -133,9 +133,99 @@ function extractStatusCodeTrigger(
 // Each test that relies on TRIGGER_FAIL_ONCE must call resetFailOnceCounter()
 // in its beforeEach to avoid cross-test interference.
 let failOnceCounter = 0;
+let currentMockServerUrl = "http://localhost:3001";
+let videoCounter = 0;
+
+interface MockVideoJobState {
+	id: string;
+	object: "video";
+	model: string;
+	status: string;
+	progress: number;
+	created_at: number;
+	completed_at: number | null;
+	expires_at: number | null;
+	error: { code?: string; message: string } | null;
+	content?: Array<{
+		type: "video";
+		url: string;
+		mime_type: string;
+	}>;
+}
+
+interface MockWebhookDelivery {
+	name: string;
+	headers: Record<string, string>;
+	body: unknown;
+}
+
+const videoJobs = new Map<string, MockVideoJobState>();
+const webhookDeliveries: MockWebhookDelivery[] = [];
+const webhookStatuses = new Map<string, number>();
 
 export function resetFailOnceCounter() {
 	failOnceCounter = 0;
+}
+
+export function resetMockVideoState() {
+	videoCounter = 0;
+	videoJobs.clear();
+	webhookDeliveries.length = 0;
+	webhookStatuses.clear();
+}
+
+export function setMockVideoStatus(
+	videoId: string,
+	status: MockVideoJobState["status"],
+	overrides: Partial<MockVideoJobState> = {},
+) {
+	const current = videoJobs.get(videoId);
+	if (!current) {
+		throw new Error(`Mock video job ${videoId} not found`);
+	}
+
+	const next: MockVideoJobState = {
+		...current,
+		status,
+		progress: status === "completed" ? 100 : current.progress,
+		completed_at:
+			status === "completed"
+				? Math.floor(Date.now() / 1000)
+				: current.completed_at,
+		error:
+			status === "failed"
+				? {
+						message: "Mock video generation failed",
+					}
+				: null,
+		...overrides,
+	};
+
+	if (status === "completed" && !next.content) {
+		next.content = [
+			{
+				type: "video",
+				url: `${currentMockServerUrl}/mock-assets/${videoId}`,
+				mime_type: "video/mp4",
+			},
+		];
+	}
+
+	videoJobs.set(videoId, next);
+}
+
+export function getMockVideo(videoId: string): MockVideoJobState | undefined {
+	return videoJobs.get(videoId);
+}
+
+export function setMockWebhookStatus(name: string, status: number) {
+	webhookStatuses.set(name, status);
+}
+
+export function getMockWebhookDeliveries(name?: string): MockWebhookDelivery[] {
+	return webhookDeliveries.filter((delivery) =>
+		name ? delivery.name === name : true,
+	);
 }
 
 // Helper to delay response
@@ -269,6 +359,69 @@ mockOpenAIServer.post("/v1/chat/completions", async (c) => {
 	};
 
 	return c.json(response);
+});
+
+mockOpenAIServer.post("/v1/videos", async (c) => {
+	const body = await c.req.json();
+	videoCounter++;
+	const id = `video_${videoCounter}`;
+	const job: MockVideoJobState = {
+		id,
+		object: "video",
+		model: body.model ?? "veo-3.1",
+		status: "queued",
+		progress: 0,
+		created_at: Math.floor(Date.now() / 1000),
+		completed_at: null,
+		expires_at: null,
+		error: null,
+	};
+
+	videoJobs.set(id, job);
+
+	return c.json(job);
+});
+
+mockOpenAIServer.get("/v1/videos/:id", async (c) => {
+	const id = c.req.param("id");
+	const job = videoJobs.get(id);
+
+	if (!job) {
+		c.status(404);
+		return c.json({
+			error: {
+				message: "Video job not found",
+				code: "not_found",
+			},
+		});
+	}
+
+	return c.json(job);
+});
+
+mockOpenAIServer.get("/mock-assets/:id", async (c) => {
+	const id = c.req.param("id");
+	return c.body(`mock-video-${id}`, 200, {
+		"Content-Type": "video/mp4",
+	});
+});
+
+mockOpenAIServer.post("/mock-callback/:name", async (c) => {
+	const name = c.req.param("name");
+	const headers = Object.fromEntries(c.req.raw.headers.entries());
+	const body = await c.req.json();
+
+	webhookDeliveries.push({
+		name,
+		headers,
+		body,
+	});
+
+	const status = webhookStatuses.get(name) ?? 200;
+	c.status(status as any);
+	return c.json({
+		ok: status >= 200 && status < 300,
+	});
 });
 
 // Handle Google Vertex AI generateContent endpoint (Gemini models via Vertex)
@@ -427,6 +580,8 @@ export function startMockServer(port = 3001): string {
 	if (server) {
 		return `http://localhost:${port}`;
 	}
+
+	currentMockServerUrl = `http://localhost:${port}`;
 
 	server = serve({
 		fetch: mockOpenAIServer.fetch,

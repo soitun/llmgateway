@@ -691,6 +691,32 @@ export const googleModels = [
 		],
 	},
 	{
+		id: "veo-3.1",
+		name: "Veo 3.1",
+		description: "Google Veo 3.1 text-to-video generation via Obsidian.",
+		family: "google",
+		output: ["video"],
+		stability: "beta",
+		releasedAt: new Date("2026-03-14"),
+		providers: [
+			{
+				providerId: "obsidian",
+				modelName: "veo-3.1",
+				inputPrice: undefined,
+				outputPrice: undefined,
+				requestPrice: 0.25,
+				discount: 0.2,
+				contextSize: 32768,
+				maxOutput: 1,
+				streaming: false,
+				tools: false,
+				jsonOutput: false,
+				jsonOutputSchema: false,
+				videoGenerations: true,
+			},
+		],
+	},
+	{
 		id: "gemini-3.1-flash-image-preview",
 		name: "Gemini 3.1 Flash Image (Preview)",
 		description:
