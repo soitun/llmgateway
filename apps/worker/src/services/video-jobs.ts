@@ -265,6 +265,31 @@ function readNestedValue(
 	return undefined;
 }
 
+function getStoredVideoDebugPayload(
+	job: VideoJobRecord,
+	key: "llmgateway_raw_request" | "llmgateway_upstream_request",
+): unknown | null {
+	for (const candidate of getVideoMetadataCandidates(job)) {
+		if (!(key in candidate)) {
+			continue;
+		}
+
+		return candidate[key] ?? null;
+	}
+
+	return null;
+}
+
+function getFormattedRequestedVideoModel(job: VideoJobRecord): string {
+	return job.requestedProvider
+		? `${job.requestedProvider}/${job.model}`
+		: job.model;
+}
+
+function getFormattedUsedVideoModel(job: VideoJobRecord): string {
+	return `${job.usedProvider}/${job.model}`;
+}
+
 function getRequestedVideoSize(job: VideoJobRecord): string | null {
 	for (const candidate of getVideoMetadataCandidates(job)) {
 		const value = readNestedValue(candidate, "size");
@@ -920,10 +945,25 @@ async function finalizeVideoJob(job: VideoJobRecord): Promise<void> {
 
 	if (!currentJob.resultLoggedAt) {
 		const now = new Date();
+		const organization = await db
+			.select()
+			.from(tables.organization)
+			.where(eq(tables.organization.id, currentJob.organizationId))
+			.limit(1)
+			.then((rows) => rows[0]);
 		const videoOutputCost =
 			currentJob.status === "completed" ? getVideoOutputCost(currentJob) : 0;
 		const responsePayload = serializeVideoJob(currentJob);
 		const responseSize = JSON.stringify(responsePayload).length;
+		const messages =
+			organization?.retentionLevel === "retain"
+				? [
+						{
+							role: "user",
+							content: currentJob.prompt,
+						},
+					]
+				: null;
 
 		await db.insert(tables.log).values({
 			requestId: currentJob.requestId,
@@ -931,9 +971,10 @@ async function finalizeVideoJob(job: VideoJobRecord): Promise<void> {
 			projectId: currentJob.projectId,
 			apiKeyId: currentJob.apiKeyId,
 			duration: Math.max(0, Date.now() - currentJob.createdAt.getTime()),
-			requestedModel: currentJob.model,
+			requestedModel: getFormattedRequestedVideoModel(currentJob),
 			requestedProvider: currentJob.requestedProvider,
-			usedModel: currentJob.usedModel,
+			usedModel: getFormattedUsedVideoModel(currentJob),
+			usedModelMapping: currentJob.usedModel,
 			usedProvider: currentJob.usedProvider,
 			responseSize,
 			content:
@@ -958,9 +999,18 @@ async function finalizeVideoJob(job: VideoJobRecord): Promise<void> {
 			requestCost: 0,
 			videoOutputCost,
 			estimatedCost: false,
+			messages,
 			mode: currentJob.mode,
 			usedMode: currentJob.usedMode,
+			rawRequest: getStoredVideoDebugPayload(
+				currentJob,
+				"llmgateway_raw_request",
+			),
 			rawResponse: responsePayload,
+			upstreamRequest: getStoredVideoDebugPayload(
+				currentJob,
+				"llmgateway_upstream_request",
+			),
 			upstreamResponse: currentJob.upstreamStatusResponse,
 			processedAt: null,
 			dataStorageCost: "0",

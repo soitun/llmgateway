@@ -316,6 +316,11 @@ interface ResolvedVideoExecution {
 	upstreamModelName: string;
 }
 
+interface ParsedVideoRequest {
+	rawBody: unknown;
+	request: z.infer<typeof createVideoRequestSchema>;
+}
+
 function getAvailableCredits(
 	organization: InferSelectModel<typeof tables.organization>,
 ): number {
@@ -1120,9 +1125,7 @@ async function requireVideoJobForProject(
 	return job;
 }
 
-async function parseJsonBody(
-	c: Context,
-): Promise<z.infer<typeof createVideoRequestSchema>> {
+async function parseJsonBody(c: Context): Promise<ParsedVideoRequest> {
 	let rawBody: unknown;
 	try {
 		rawBody = await c.req.json();
@@ -1139,7 +1142,18 @@ async function parseJsonBody(
 		});
 	}
 
-	return validationResult.data;
+	return {
+		rawBody,
+		request: validationResult.data,
+	};
+}
+
+function isDebugMode(c: Context): boolean {
+	return (
+		c.req.header("x-debug") === "true" ||
+		process.env.FORCE_DEBUG_MODE === "true" ||
+		process.env.NODE_ENV !== "production"
+	);
 }
 
 async function fetchUpstreamJson(
@@ -1224,7 +1238,11 @@ async function createObsidianVideoJob(
 	providerMapping: ProviderModelMapping,
 	videoSize: VideoSizeConfig,
 	prompt: string,
-): Promise<{ upstreamId: string; upstreamResponse: Record<string, unknown> }> {
+): Promise<{
+	upstreamId: string;
+	upstreamRequest: Record<string, unknown>;
+	upstreamResponse: Record<string, unknown>;
+}> {
 	const upstreamUrl = joinUrl(providerContext.baseUrl, "/v1/videos");
 	const upstreamModelName = getVideoUpstreamModelName(
 		"obsidian",
@@ -1254,7 +1272,7 @@ async function createObsidianVideoJob(
 		});
 	}
 
-	return { upstreamId, upstreamResponse };
+	return { upstreamId, upstreamRequest, upstreamResponse };
 }
 
 async function createAvalancheVideoJob(
@@ -1262,7 +1280,11 @@ async function createAvalancheVideoJob(
 	providerMapping: ProviderModelMapping,
 	videoSize: VideoSizeConfig,
 	prompt: string,
-): Promise<{ upstreamId: string; upstreamResponse: Record<string, unknown> }> {
+): Promise<{
+	upstreamId: string;
+	upstreamRequest: Record<string, unknown>;
+	upstreamResponse: Record<string, unknown>;
+}> {
 	const upstreamUrl = joinUrl(providerContext.baseUrl, "/generate");
 	const upstreamModelName = getVideoUpstreamModelName(
 		"avalanche",
@@ -1300,7 +1322,7 @@ async function createAvalancheVideoJob(
 		});
 	}
 
-	return { upstreamId, upstreamResponse };
+	return { upstreamId, upstreamRequest, upstreamResponse };
 }
 
 async function createGoogleVertexVideoJob(
@@ -1308,7 +1330,11 @@ async function createGoogleVertexVideoJob(
 	providerMapping: ProviderModelMapping,
 	videoSize: VideoSizeConfig,
 	prompt: string,
-): Promise<{ upstreamId: string; upstreamResponse: Record<string, unknown> }> {
+): Promise<{
+	upstreamId: string;
+	upstreamRequest: Record<string, unknown>;
+	upstreamResponse: Record<string, unknown>;
+}> {
 	if (!providerContext.vertexProjectId || !providerContext.vertexRegion) {
 		throw new HTTPException(500, {
 			message:
@@ -1359,6 +1385,7 @@ async function createGoogleVertexVideoJob(
 
 	return {
 		upstreamId,
+		upstreamRequest,
 		upstreamResponse: addRequestedVideoMetadata(
 			{
 				...rawResponse,
@@ -1379,7 +1406,11 @@ async function createUpstreamVideoJob(
 	providerMapping: ProviderModelMapping,
 	videoSize: VideoSizeConfig,
 	prompt: string,
-): Promise<{ upstreamId: string; upstreamResponse: Record<string, unknown> }> {
+): Promise<{
+	upstreamId: string;
+	upstreamRequest: Record<string, unknown>;
+	upstreamResponse: Record<string, unknown>;
+}> {
 	switch (providerContext.providerId) {
 		case "obsidian":
 			return await createObsidianVideoJob(
@@ -1412,11 +1443,12 @@ async function createUpstreamVideoJob(
 export const videos = new OpenAPIHono<ServerTypes>();
 
 videos.openapi(createVideo, async (c) => {
-	const request = await parseJsonBody(c);
+	const { rawBody, request } = await parseJsonBody(c);
 	const { apiKey, project, organization, requestId } =
 		await requireRequestContext(c);
 	const { normalizedModel, requestedProvider } = getVideoModel(request.model);
 	const videoSize = getVideoSizeConfig(request.size);
+	const debugMode = isDebugMode(c);
 
 	if (getAvailableCredits(organization) < MIN_VIDEO_GENERATION_BALANCE) {
 		throw new HTTPException(402, {
@@ -1453,12 +1485,13 @@ videos.openapi(createVideo, async (c) => {
 			project,
 			organization.id,
 		);
-	const { upstreamId, upstreamResponse } = await createUpstreamVideoJob(
-		providerContext,
-		providerMapping,
-		videoSize,
-		request.prompt,
-	);
+	const { upstreamId, upstreamRequest, upstreamResponse } =
+		await createUpstreamVideoJob(
+			providerContext,
+			providerMapping,
+			videoSize,
+			request.prompt,
+		);
 
 	const initialStatus = normalizeVideoStatus(upstreamResponse.status);
 	const created = await db
@@ -1494,7 +1527,15 @@ videos.openapi(createVideo, async (c) => {
 			callbackUrl: request.callback_url ?? null,
 			callbackSecret: request.callback_secret ?? null,
 			callbackStatus: request.callback_url ? "pending" : "none",
-			upstreamCreateResponse: upstreamResponse,
+			upstreamCreateResponse: {
+				...upstreamResponse,
+				...(debugMode
+					? {
+							llmgateway_raw_request: rawBody,
+							llmgateway_upstream_request: upstreamRequest,
+						}
+					: {}),
+			},
 			upstreamStatusResponse: upstreamResponse,
 		})
 		.returning()

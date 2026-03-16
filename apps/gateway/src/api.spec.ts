@@ -346,12 +346,28 @@ describe("test", () => {
 		expect(await contentRes.text()).toBe(`mock-video-${videoJob!.upstreamId}`);
 
 		const logs = await db.query.log.findMany({
-			where: { usedModel: { eq: "veo-3.1-landscape" } },
+			where: { usedModel: { eq: "obsidian/veo-3.1-generate-preview" } },
 		});
 		expect(logs).toHaveLength(1);
+		expect(logs[0].usedModelMapping).toBe("veo-3.1-landscape");
 		expect(logs[0].requestCost).toBe(0);
 		expect(logs[0].videoOutputCost).toBe(3.2);
 		expect(logs[0].cost).toBe(3.2);
+		expect(logs[0].messages).toEqual([
+			{
+				role: "user",
+				content: "A cinematic sunset over mountains",
+			},
+		]);
+		expect(logs[0].rawRequest).toEqual({
+			model: "obsidian/veo-3.1-generate-preview",
+			prompt: "A cinematic sunset over mountains",
+		});
+		expect(logs[0].upstreamRequest).toEqual({
+			model: "veo-3.1-landscape",
+			prompt: "A cinematic sunset over mountains",
+			size: "1280x720",
+		});
 	});
 
 	test("/v1/videos supports completed 4k avalanche jobs", async () => {
@@ -418,9 +434,10 @@ describe("test", () => {
 		);
 
 		const logs = await db.query.log.findMany({
-			where: { usedModel: { eq: "veo3_fast" } },
+			where: { usedModel: { eq: "avalanche/veo-3.1-fast-generate-preview" } },
 		});
 		expect(logs).toHaveLength(1);
+		expect(logs[0].usedModelMapping).toBe("veo3_fast");
 		expect(logs[0].requestCost).toBe(0);
 		expect(logs[0].videoOutputCost).toBe(2.8);
 		expect(logs[0].cost).toBe(2.8);
@@ -496,9 +513,10 @@ describe("test", () => {
 			);
 
 			const logs = await db.query.log.findMany({
-				where: { usedProvider: { eq: "google-vertex" } },
+				where: { usedModel: { eq: "google-vertex/veo-3.1-generate-preview" } },
 			});
 			expect(logs).toHaveLength(1);
+			expect(logs[0].usedModelMapping).toBe("veo-3.1-generate-preview");
 			expect(logs[0].videoOutputCost).toBe(4.8);
 			expect(logs[0].cost).toBe(4.8);
 		} finally {
@@ -559,9 +577,10 @@ describe("test", () => {
 		await processPendingWebhookDeliveries();
 
 		const logs = await db.query.log.findMany({
-			where: { usedModel: { eq: "veo-3.1-fast-landscape" } },
+			where: { usedModel: { eq: "obsidian/veo-3.1-fast-generate-preview" } },
 		});
 		expect(logs).toHaveLength(1);
+		expect(logs[0].usedModelMapping).toBe("veo-3.1-fast-landscape");
 		expect(logs[0].requestCost).toBe(0);
 		expect(logs[0].videoOutputCost).toBe(1.2);
 
