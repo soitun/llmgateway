@@ -46,7 +46,6 @@ const TERMINAL_VIDEO_STATUSES = new Set([
 	"expired",
 ]);
 const MIN_VIDEO_GENERATION_BALANCE = 1;
-const DEFAULT_VIDEO_DURATION_SECONDS = 8;
 const DEFAULT_VIDEO_SIZE = "1280x720";
 const SUPPORTED_VEO_VIDEO_SIZES = {
 	"1280x720": {
@@ -125,7 +124,7 @@ const createVideoRequestSchema = z
 			example: "whsec_test_secret",
 		}),
 		input_reference: z.unknown().optional(),
-		seconds: z.number().int().optional().openapi({
+		seconds: z.number().int().openapi({
 			description:
 				"Output duration in seconds. Veo 3.1 supports 4, 6, or 8 seconds on Google Vertex. Other providers currently only support the default 8-second output.",
 			example: 8,
@@ -911,8 +910,8 @@ function appendQueryParam(url: string, key: string, value: string): string {
 	return resolvedUrl.toString();
 }
 
-function getVideoDurationSeconds(seconds: number | undefined): number {
-	return seconds ?? DEFAULT_VIDEO_DURATION_SECONDS;
+function getVideoDurationSeconds(seconds: number): number {
+	return seconds;
 }
 
 function normalizeVideoStatus(value: unknown): VideoJobRecord["status"] {
@@ -1602,11 +1601,7 @@ videos.openapi(createVideo, async (c) => {
 			project,
 			organization.id,
 		);
-	if (
-		providerContext.providerId !== "google-vertex" &&
-		request.seconds !== undefined &&
-		request.seconds !== DEFAULT_VIDEO_DURATION_SECONDS
-	) {
+	if (providerContext.providerId !== "google-vertex" && request.seconds !== 8) {
 		throw new HTTPException(400, {
 			message: `Requested duration ${request.seconds}s is not supported for model ${normalizedModel} on ${providerContext.providerId}.`,
 		});

@@ -15,7 +15,7 @@ CALLBACK_SECRET=""
 PROMPT_ARGS=""
 
 usage() {
-	echo "Usage: $0 [--local] [--model MODEL] [--size WIDTHxHEIGHT] [--duration SECONDS] [--output FILE] [--interval SECONDS] [--callback-url URL --callback-secret SECRET] <prompt>" >&2
+	echo "Usage: $0 [--local] [--model MODEL] [--size WIDTHxHEIGHT] --duration SECONDS [--output FILE] [--interval SECONDS] [--callback-url URL --callback-secret SECRET] <prompt>" >&2
 	exit 1
 }
 
@@ -102,6 +102,11 @@ if [ -z "$PROMPT" ]; then
 	usage
 fi
 
+if [ -z "$DURATION" ]; then
+	echo "duration is required" >&2
+	exit 1
+fi
+
 if [ -n "$CALLBACK_URL" ] && [ -z "$CALLBACK_SECRET" ]; then
 	echo "callback_secret is required when callback_url is set" >&2
 	exit 1
@@ -139,15 +144,9 @@ PAYLOAD=$(
 				{}
 			end
 		)
-		+ (
-			if $duration != "" then
-				{
-					seconds: ($duration | tonumber)
-				}
-			else
-				{}
-			end
-		)
+		+ {
+			seconds: ($duration | tonumber)
+		}
 		+ (
 			if $callback_url != "" then
 				{
@@ -161,7 +160,7 @@ PAYLOAD=$(
 )
 
 log "Creating video job"
-log "base_url=${BASE_URL} model=${MODEL} size=${SIZE:-default} duration=${DURATION:-default}"
+log "base_url=${BASE_URL} model=${MODEL} size=${SIZE:-default} duration=${DURATION}"
 CREATE_STATUS=$(
 	curl -sS \
 		-o "$CREATE_RESPONSE_FILE" \

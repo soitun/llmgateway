@@ -134,6 +134,7 @@ describe("test", () => {
 			body: JSON.stringify({
 				model: "veo-3.1-generate-preview",
 				prompt: "A robot dancing in the rain",
+				seconds: 8,
 			}),
 		});
 
@@ -182,6 +183,7 @@ describe("test", () => {
 				model: "veo-3.1-fast-generate-preview",
 				prompt: "A race car on a mountain road",
 				size: "1920x1080",
+				seconds: 8,
 			}),
 		});
 
@@ -218,6 +220,7 @@ describe("test", () => {
 				model: "veo-3.1-generate-preview",
 				prompt: "A skateboarder landing a trick",
 				size: "720x1280",
+				seconds: 8,
 			}),
 		});
 
@@ -269,6 +272,7 @@ describe("test", () => {
 				model: "veo-3.1-generate-preview",
 				prompt: "A motorcycle driving through Tokyo at night",
 				size: "1920x1080",
+				seconds: 8,
 			}),
 		});
 
@@ -312,6 +316,7 @@ describe("test", () => {
 			body: JSON.stringify({
 				model: "obsidian/veo-3.1-generate-preview",
 				prompt: "A cinematic sunset over mountains",
+				seconds: 8,
 			}),
 		});
 
@@ -362,6 +367,7 @@ describe("test", () => {
 		expect(logs[0].rawRequest).toEqual({
 			model: "obsidian/veo-3.1-generate-preview",
 			prompt: "A cinematic sunset over mountains",
+			seconds: 8,
 		});
 		expect(logs[0].upstreamRequest).toEqual({
 			model: "veo-3.1-landscape",
@@ -397,6 +403,7 @@ describe("test", () => {
 				model: "avalanche/veo-3.1-fast-generate-preview",
 				prompt: "A storm above a mountain range",
 				size: "3840x2160",
+				seconds: 8,
 			}),
 		});
 
@@ -482,6 +489,7 @@ describe("test", () => {
 					model: "google-vertex/veo-3.1-generate-preview",
 					prompt: "A cinematic waterfall in the mountains",
 					size: "3840x2160",
+					seconds: 8,
 				}),
 			});
 
@@ -666,6 +674,7 @@ describe("test", () => {
 					model: "google-vertex/veo-3.1-generate-preview",
 					prompt: "A cinematic waterfall in the mountains",
 					size: "1920x1080",
+					seconds: 8,
 				}),
 			});
 
@@ -753,6 +762,7 @@ describe("test", () => {
 				prompt: "A whale swimming through clouds",
 				callback_url: `${mockServerUrl}/mock-callback/video-job`,
 				callback_secret: "whsec_test",
+				seconds: 8,
 			}),
 		});
 
@@ -820,6 +830,7 @@ describe("test", () => {
 				prompt: "A spaceship landing on Mars",
 				callback_url: `${mockServerUrl}/mock-callback/retry-video`,
 				callback_secret: "whsec_retry",
+				seconds: 8,
 			}),
 		});
 
@@ -876,6 +887,32 @@ describe("test", () => {
 		expect(JSON.stringify(json)).toContain("seconds");
 	});
 
+	test("/v1/videos requires seconds", async () => {
+		await db.insert(tables.apiKey).values({
+			id: "token-id",
+			token: "real-token",
+			projectId: "project-id",
+			description: "Test API Key",
+			createdBy: "user-id",
+		});
+
+		const res = await app.request("/v1/videos", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: "Bearer real-token",
+			},
+			body: JSON.stringify({
+				model: "veo-3.1-generate-preview",
+				prompt: "A fast moving train in the desert",
+			}),
+		});
+
+		expect(res.status).toBe(400);
+		const json = await res.json();
+		expect(JSON.stringify(json)).toContain("seconds");
+	});
+
 	test("/v1/videos rejects unsupported size values", async () => {
 		await db.insert(tables.apiKey).values({
 			id: "token-id",
@@ -895,6 +932,7 @@ describe("test", () => {
 				model: "veo-3.1-generate-preview",
 				prompt: "A quiet forest at dawn",
 				size: "1080x1080",
+				seconds: 8,
 			}),
 		});
 
@@ -931,6 +969,7 @@ describe("test", () => {
 				model: "veo-3.1-generate-preview",
 				prompt: "An eagle flying over snowy peaks",
 				size: "3840x2160",
+				seconds: 8,
 			}),
 		});
 
@@ -973,6 +1012,7 @@ describe("test", () => {
 			body: JSON.stringify({
 				model: "veo-3.1-generate-preview",
 				prompt: "A waterfall in slow motion",
+				seconds: 8,
 			}),
 		});
 
