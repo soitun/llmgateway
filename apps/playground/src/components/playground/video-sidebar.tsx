@@ -26,19 +26,19 @@ import { useAuth } from "@/lib/auth-client";
 
 import type { Organization } from "@/lib/types";
 
-interface ImageSidebarProps {
+interface VideoSidebarProps {
 	recentPrompts: string[];
 	onPromptClick: (prompt: string) => void;
 	selectedOrganization: Organization | null;
 	className?: string;
 }
 
-export function ImageSidebar({
+export function VideoSidebar({
 	recentPrompts,
 	onPromptClick,
 	selectedOrganization,
 	className,
-}: ImageSidebarProps) {
+}: VideoSidebarProps) {
 	const router = useRouter();
 	const posthog = usePostHog();
 	const { user, isLoading: isUserLoading } = useUser();
@@ -79,7 +79,7 @@ export function ImageSidebar({
 						>
 							<Logo className="h-10 w-10" />
 							<h1 className="text-xl font-semibold">LLM Gateway</h1>
-							<Badge>Image</Badge>
+							<Badge>Video</Badge>
 						</Link>
 					</div>
 				</SidebarHeader>
@@ -99,12 +99,12 @@ export function ImageSidebar({
 						>
 							<Logo className="h-10 w-10" />
 							<h1 className="text-xl font-semibold">LLM Gateway</h1>
-							<Badge>Image</Badge>
+							<Badge>Video</Badge>
 						</Link>
 						<div className="w-full rounded-md border p-4 text-sm">
 							<div className="font-medium mb-2">Sign in required</div>
 							<p className="text-muted-foreground mb-3">
-								Please sign in to generate images.
+								Please sign in to generate videos.
 							</p>
 							<div className="flex items-center justify-end gap-2">
 								<Button size="sm" asChild>
@@ -132,7 +132,7 @@ export function ImageSidebar({
 					>
 						<Logo className="h-10 w-10" />
 						<h1 className="text-xl font-semibold">LLM Gateway</h1>
-						<Badge>Image</Badge>
+						<Badge>Video</Badge>
 					</Link>
 				</div>
 			</SidebarHeader>
@@ -148,17 +148,17 @@ export function ImageSidebar({
 						</SidebarMenuButton>
 					</SidebarMenuItem>
 					<SidebarMenuItem>
-						<SidebarMenuButton isActive>
-							<ImageIcon className="h-4 w-4" />
-							Image Studio
+						<SidebarMenuButton asChild>
+							<Link href="/image">
+								<ImageIcon className="h-4 w-4" />
+								Image Studio
+							</Link>
 						</SidebarMenuButton>
 					</SidebarMenuItem>
 					<SidebarMenuItem>
-						<SidebarMenuButton asChild>
-							<Link href="/video">
-								<Film className="h-4 w-4" />
-								Video Studio
-							</Link>
+						<SidebarMenuButton isActive>
+							<Film className="h-4 w-4" />
+							Video Studio
 						</SidebarMenuButton>
 					</SidebarMenuItem>
 				</SidebarMenu>
