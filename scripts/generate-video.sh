@@ -6,7 +6,7 @@ BASE_URL="https://api.llmgateway.io"
 API_KEY="${LLM_GATEWAY_API_KEY:-test-token}"
 MODEL="veo-3.1-generate-preview"
 SIZE=""
-DURATION=""
+SECONDS=""
 PROMPT=""
 OUTPUT=""
 POLL_INTERVAL="5"
@@ -15,7 +15,7 @@ CALLBACK_SECRET=""
 PROMPT_ARGS=""
 
 usage() {
-	echo "Usage: $0 [--local] [--model MODEL] [--size WIDTHxHEIGHT] --duration SECONDS [--output FILE] [--interval SECONDS] [--callback-url URL --callback-secret SECRET] <prompt>" >&2
+	echo "Usage: $0 [--local] [--model MODEL] [--size WIDTHxHEIGHT] --seconds SECONDS [--output FILE] [--interval SECONDS] [--callback-url URL --callback-secret SECRET] <prompt>" >&2
 	exit 1
 }
 
@@ -49,9 +49,9 @@ while [ "$#" -gt 0 ]; do
 			SIZE="$2"
 			shift 2
 			;;
-		--duration)
+		--seconds|--duration)
 			[ "$#" -ge 2 ] || usage
-			DURATION="$2"
+			SECONDS="$2"
 			shift 2
 			;;
 		--output)
@@ -102,8 +102,8 @@ if [ -z "$PROMPT" ]; then
 	usage
 fi
 
-if [ -z "$DURATION" ]; then
-	echo "duration is required" >&2
+if [ -z "$SECONDS" ]; then
+	echo "seconds is required" >&2
 	exit 1
 fi
 
@@ -127,7 +127,7 @@ PAYLOAD=$(
 	jq -n \
 		--arg model "$MODEL" \
 		--arg size "$SIZE" \
-		--arg duration "$DURATION" \
+		--arg seconds "$SECONDS" \
 		--arg prompt "$PROMPT" \
 		--arg callback_url "$CALLBACK_URL" \
 		--arg callback_secret "$CALLBACK_SECRET" \
@@ -145,7 +145,7 @@ PAYLOAD=$(
 			end
 		)
 		+ {
-			seconds: ($duration | tonumber)
+			seconds: ($seconds | tonumber)
 		}
 		+ (
 			if $callback_url != "" then
@@ -160,7 +160,7 @@ PAYLOAD=$(
 )
 
 log "Creating video job"
-log "base_url=${BASE_URL} model=${MODEL} size=${SIZE:-default} duration=${DURATION}"
+log "base_url=${BASE_URL} model=${MODEL} size=${SIZE:-default} seconds=${SECONDS}"
 CREATE_STATUS=$(
 	curl -sS \
 		-o "$CREATE_RESPONSE_FILE" \
