@@ -724,8 +724,10 @@ export const googleModels = [
 				outputPrice: undefined,
 				requestPrice: undefined,
 				perSecondPrice: {
-					default: 0.4,
-					"4k": 0.6,
+					default_audio: 0.4,
+					default_video: 0.2,
+					"4k_audio": 0.6,
+					"4k_video": 0.4,
 				},
 				supportedVideoSizes: [
 					"1280x720",
@@ -803,8 +805,10 @@ export const googleModels = [
 				outputPrice: undefined,
 				requestPrice: undefined,
 				perSecondPrice: {
-					default: 0.15,
-					"4k": 0.35,
+					default_audio: 0.15,
+					default_video: 0.1,
+					"4k_audio": 0.35,
+					"4k_video": 0.3,
 				},
 				supportedVideoSizes: [
 					"1280x720",

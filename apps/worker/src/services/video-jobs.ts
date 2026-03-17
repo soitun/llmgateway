@@ -947,6 +947,34 @@ function is4kVideo(job: VideoJobRecord): boolean {
 	return false;
 }
 
+function videoIncludesAudio(job: VideoJobRecord): boolean | null {
+	for (const candidate of getVideoMetadataCandidates(job)) {
+		for (const key of [
+			"google_vertex_generate_audio",
+			"generate_audio",
+			"generateAudio",
+			"audio",
+			"audio_enabled",
+		]) {
+			const value = readNestedValue(candidate, key);
+			if (typeof value === "boolean") {
+				return value;
+			}
+			if (typeof value === "string") {
+				const normalized = value.toLowerCase();
+				if (normalized === "true") {
+					return true;
+				}
+				if (normalized === "false") {
+					return false;
+				}
+			}
+		}
+	}
+
+	return null;
+}
+
 function getVideoPricing(job: VideoJobRecord): Record<string, number> | null {
 	const model = models.find((item) => item.id === job.model);
 	const mapping = model?.providers.find(
@@ -974,14 +1002,26 @@ function getVideoOutputCost(job: VideoJobRecord): number {
 	const resolutionKey = is4kVideo(job)
 		? VIDEO_RESOLUTION_4K
 		: VIDEO_DEFAULT_RESOLUTION;
-	const pricePerSecond =
-		pricing[resolutionKey] ?? pricing[VIDEO_DEFAULT_RESOLUTION];
+	const includesAudio = videoIncludesAudio(job);
+	const priceCandidates =
+		includesAudio === null
+			? [resolutionKey, VIDEO_DEFAULT_RESOLUTION]
+			: [
+					`${resolutionKey}_${includesAudio ? "audio" : "video"}`,
+					`${VIDEO_DEFAULT_RESOLUTION}_${includesAudio ? "audio" : "video"}`,
+					resolutionKey,
+					VIDEO_DEFAULT_RESOLUTION,
+				];
+	const pricePerSecond = priceCandidates
+		.map((key) => pricing[key])
+		.find((value): value is number => value !== undefined);
 	if (pricePerSecond === undefined) {
 		logger.warn("Could not determine per-second video price", {
 			videoId: job.id,
 			model: job.model,
 			upstreamId: job.upstreamId,
 			resolutionKey,
+			includesAudio,
 		});
 		return 0;
 	}

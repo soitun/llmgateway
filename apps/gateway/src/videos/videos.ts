@@ -1497,6 +1497,7 @@ async function createGoogleVertexVideoJob(
 				google_vertex_project_id: providerContext.vertexProjectId,
 				google_vertex_region: providerContext.vertexRegion,
 				google_vertex_model_name: upstreamModelName,
+				google_vertex_generate_audio: true,
 				...(outputStorageUri
 					? {
 							google_vertex_output_storage_uri: outputStorageUri,

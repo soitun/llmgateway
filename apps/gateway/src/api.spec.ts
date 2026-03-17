@@ -557,6 +557,76 @@ describe("test", () => {
 		}
 	});
 
+	test("/v1/videos bills google-vertex fast using audio pricing", async () => {
+		const originalGoogleCloudProject = process.env.LLM_GOOGLE_CLOUD_PROJECT;
+		const originalGoogleVertexRegion = process.env.LLM_GOOGLE_VERTEX_REGION;
+		process.env.LLM_GOOGLE_CLOUD_PROJECT = "test-project";
+		process.env.LLM_GOOGLE_VERTEX_REGION = "us-central1";
+
+		try {
+			await db.insert(tables.apiKey).values({
+				id: "token-id",
+				token: "real-token",
+				projectId: "project-id",
+				description: "Test API Key",
+				createdBy: "user-id",
+			});
+
+			await db.insert(tables.providerKey).values({
+				id: "provider-key-id",
+				token: "vertex-test-token",
+				provider: "google-vertex",
+				organizationId: "org-id",
+				baseUrl: mockServerUrl,
+			});
+
+			const createRes = await app.request("/v1/videos", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer real-token",
+				},
+				body: JSON.stringify({
+					model: "google-vertex/veo-3.1-fast-generate-preview",
+					prompt: "A stylish coffee pour in a modern cafe",
+					size: "1920x1080",
+					seconds: 4,
+				}),
+			});
+
+			expect(createRes.status).toBe(200);
+			const created = await createRes.json();
+
+			const videoJob = await db.query.videoJob.findFirst({
+				where: { id: { eq: created.id } },
+			});
+			expect(videoJob).toBeTruthy();
+
+			setMockVideoStatus(videoJob!.upstreamId, "completed");
+			await processPendingVideoJobs();
+
+			const logs = await db.query.log.findMany({
+				where: {
+					usedModel: { eq: "google-vertex/veo-3.1-fast-generate-preview" },
+				},
+			});
+			expect(logs).toHaveLength(1);
+			expect(logs[0].videoOutputCost).toBe(0.6);
+			expect(logs[0].cost).toBe(0.6);
+		} finally {
+			if (originalGoogleCloudProject !== undefined) {
+				process.env.LLM_GOOGLE_CLOUD_PROJECT = originalGoogleCloudProject;
+			} else {
+				delete process.env.LLM_GOOGLE_CLOUD_PROJECT;
+			}
+			if (originalGoogleVertexRegion !== undefined) {
+				process.env.LLM_GOOGLE_VERTEX_REGION = originalGoogleVertexRegion;
+			} else {
+				delete process.env.LLM_GOOGLE_VERTEX_REGION;
+			}
+		}
+	});
+
 	test("/v1/videos keeps inline vertex output when no GCS bucket is configured", async () => {
 		const originalGoogleCloudProject = process.env.LLM_GOOGLE_CLOUD_PROJECT;
 		const originalGoogleVertexRegion = process.env.LLM_GOOGLE_VERTEX_REGION;

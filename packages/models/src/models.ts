@@ -96,7 +96,8 @@ export interface ProviderModelMapping {
 	requestPrice?: number;
 	/**
 	 * Price per second in USD for video generation models.
-	 * Maps resolution keys like "default" and "4k" to per-second pricing.
+	 * Maps billing keys like "default", "4k", "default_audio", "4k_audio",
+	 * "default_video", and "4k_video" to per-second pricing.
 	 */
 	perSecondPrice?: Record<string, number>;
 	/**
