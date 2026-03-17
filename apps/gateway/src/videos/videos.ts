@@ -885,6 +885,12 @@ function joinUrl(baseUrl: string, path: string): string {
 	return new URL(normalizedPath, normalizedBaseUrl).toString();
 }
 
+function appendQueryParam(url: string, key: string, value: string): string {
+	const resolvedUrl = new URL(url);
+	resolvedUrl.searchParams.set(key, value);
+	return resolvedUrl.toString();
+}
+
 function normalizeVideoStatus(value: unknown): VideoJobRecord["status"] {
 	if (typeof value !== "string") {
 		return "queued";
@@ -1351,6 +1357,11 @@ async function createGoogleVertexVideoJob(
 		providerContext.baseUrl,
 		`/v1/projects/${providerContext.vertexProjectId}/locations/${providerContext.vertexRegion}/publishers/google/models/${upstreamModelName}:predictLongRunning`,
 	);
+	const authenticatedUpstreamUrl = appendQueryParam(
+		upstreamUrl,
+		"key",
+		providerContext.token,
+	);
 	const upstreamRequest = {
 		instances: [
 			{
@@ -1365,11 +1376,10 @@ async function createGoogleVertexVideoJob(
 			sampleCount: 1,
 		},
 	};
-	const rawResponse = await fetchUpstreamJson(upstreamUrl, {
+	const rawResponse = await fetchUpstreamJson(authenticatedUpstreamUrl, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
-			Authorization: `Bearer ${providerContext.token}`,
 		},
 		body: JSON.stringify(upstreamRequest),
 	});

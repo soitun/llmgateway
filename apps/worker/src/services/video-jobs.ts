@@ -33,6 +33,10 @@ type VideoJobRecord = InferSelectModel<typeof tables.videoJob>;
 type WebhookDeliveryRecord = InferSelectModel<typeof tables.webhookDeliveryLog>;
 
 function getVideoProviderHeaders(job: VideoJobRecord): Record<string, string> {
+	if (job.usedProvider === "google-vertex") {
+		return {};
+	}
+
 	return {
 		Authorization: `Bearer ${job.providerToken}`,
 	};
@@ -42,6 +46,12 @@ function joinUrl(baseUrl: string, path: string): string {
 	const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
 	const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
 	return new URL(normalizedPath, normalizedBaseUrl).toString();
+}
+
+function appendQueryParam(url: string, key: string, value: string): string {
+	const resolvedUrl = new URL(url);
+	resolvedUrl.searchParams.set(key, value);
+	return resolvedUrl.toString();
 }
 
 function normalizeVideoStatus(value: unknown): VideoJobRecord["status"] {
@@ -793,7 +803,8 @@ async function fetchGoogleVertexStatus(
 		job.providerBaseUrl,
 		`/v1/projects/${operationMetadata.projectId}/locations/${operationMetadata.region}/publishers/google/models/${operationMetadata.modelName}:fetchPredictOperation`,
 	);
-	const { body, response } = await fetchJsonResponse(url, {
+	const authenticatedUrl = appendQueryParam(url, "key", job.providerToken);
+	const { body, response } = await fetchJsonResponse(authenticatedUrl, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",

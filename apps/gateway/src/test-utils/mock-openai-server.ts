@@ -522,6 +522,15 @@ mockOpenAIServer.post("/api/v1/veo/generate", async (c) => {
 mockOpenAIServer.post(
 	"/v1/projects/:project/locations/:location/publishers/google/models/*",
 	async (c, next) => {
+		if (c.req.query("key") !== "vertex-test-token") {
+			c.status(401);
+			return c.json({
+				error: {
+					message: "Invalid Vertex API key",
+				},
+			});
+		}
+
 		const body = await c.req.json();
 		const modelPath = c.req.path.split("/models/")[1] ?? "";
 		const [modelName, action] = modelPath.split(":");
