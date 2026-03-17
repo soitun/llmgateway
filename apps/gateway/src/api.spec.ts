@@ -446,8 +446,14 @@ describe("test", () => {
 	test("/v1/videos supports completed google-vertex jobs", async () => {
 		const originalGoogleCloudProject = process.env.LLM_GOOGLE_CLOUD_PROJECT;
 		const originalGoogleVertexRegion = process.env.LLM_GOOGLE_VERTEX_REGION;
+		const originalGoogleVertexVideoOutputBucket =
+			process.env.LLM_GOOGLE_VERTEX_VIDEO_OUTPUT_BUCKET;
+		const originalGoogleVertexSignedUrlBaseUrl =
+			process.env.LLM_GOOGLE_VERTEX_TEST_SIGNED_URL_BASE_URL;
 		process.env.LLM_GOOGLE_CLOUD_PROJECT = "test-project";
 		process.env.LLM_GOOGLE_VERTEX_REGION = "us-central1";
+		process.env.LLM_GOOGLE_VERTEX_VIDEO_OUTPUT_BUCKET = "vertex-test-bucket";
+		process.env.LLM_GOOGLE_VERTEX_TEST_SIGNED_URL_BASE_URL = `${mockServerUrl}/mock-gcs`;
 
 		try {
 			await db.insert(tables.apiKey).values({
@@ -500,6 +506,9 @@ describe("test", () => {
 			expect(getRes.status).toBe(200);
 			const jobJson = await getRes.json();
 			expect(jobJson.status).toBe("completed");
+			expect(jobJson.content?.[0]?.url).toContain(
+				`${mockServerUrl}/mock-gcs/vertex-test-bucket/`,
+			);
 
 			const contentRes = await app.request(`/v1/videos/${created.id}/content`, {
 				headers: {
@@ -517,6 +526,9 @@ describe("test", () => {
 			});
 			expect(logs).toHaveLength(1);
 			expect(logs[0].usedModelMapping).toBe("veo-3.1-generate-preview");
+			expect(logs[0].content).toContain(
+				`${mockServerUrl}/mock-gcs/vertex-test-bucket/`,
+			);
 			expect(logs[0].videoOutputCost).toBe(4.8);
 			expect(logs[0].cost).toBe(4.8);
 		} finally {
@@ -529,6 +541,116 @@ describe("test", () => {
 				process.env.LLM_GOOGLE_VERTEX_REGION = originalGoogleVertexRegion;
 			} else {
 				delete process.env.LLM_GOOGLE_VERTEX_REGION;
+			}
+			if (originalGoogleVertexVideoOutputBucket !== undefined) {
+				process.env.LLM_GOOGLE_VERTEX_VIDEO_OUTPUT_BUCKET =
+					originalGoogleVertexVideoOutputBucket;
+			} else {
+				delete process.env.LLM_GOOGLE_VERTEX_VIDEO_OUTPUT_BUCKET;
+			}
+			if (originalGoogleVertexSignedUrlBaseUrl !== undefined) {
+				process.env.LLM_GOOGLE_VERTEX_TEST_SIGNED_URL_BASE_URL =
+					originalGoogleVertexSignedUrlBaseUrl;
+			} else {
+				delete process.env.LLM_GOOGLE_VERTEX_TEST_SIGNED_URL_BASE_URL;
+			}
+		}
+	});
+
+	test("/v1/videos keeps inline vertex output when no GCS bucket is configured", async () => {
+		const originalGoogleCloudProject = process.env.LLM_GOOGLE_CLOUD_PROJECT;
+		const originalGoogleVertexRegion = process.env.LLM_GOOGLE_VERTEX_REGION;
+		const originalGoogleVertexVideoOutputBucket =
+			process.env.LLM_GOOGLE_VERTEX_VIDEO_OUTPUT_BUCKET;
+		const originalGoogleVertexSignedUrlBaseUrl =
+			process.env.LLM_GOOGLE_VERTEX_TEST_SIGNED_URL_BASE_URL;
+		process.env.LLM_GOOGLE_CLOUD_PROJECT = "test-project";
+		process.env.LLM_GOOGLE_VERTEX_REGION = "us-central1";
+		delete process.env.LLM_GOOGLE_VERTEX_VIDEO_OUTPUT_BUCKET;
+		delete process.env.LLM_GOOGLE_VERTEX_TEST_SIGNED_URL_BASE_URL;
+
+		try {
+			await db.insert(tables.apiKey).values({
+				id: "token-id",
+				token: "real-token",
+				projectId: "project-id",
+				description: "Test API Key",
+				createdBy: "user-id",
+			});
+
+			await db.insert(tables.providerKey).values({
+				id: "provider-key-id",
+				token: "vertex-test-token",
+				provider: "google-vertex",
+				organizationId: "org-id",
+				baseUrl: mockServerUrl,
+			});
+
+			const createRes = await app.request("/v1/videos", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer real-token",
+				},
+				body: JSON.stringify({
+					model: "google-vertex/veo-3.1-generate-preview",
+					prompt: "A cinematic waterfall in the mountains",
+					size: "1920x1080",
+				}),
+			});
+
+			expect(createRes.status).toBe(200);
+			const created = await createRes.json();
+
+			const videoJob = await db.query.videoJob.findFirst({
+				where: { id: { eq: created.id } },
+			});
+			expect(videoJob?.storageUri).toBeNull();
+
+			setMockVideoStatus(videoJob!.upstreamId, "completed");
+			await processPendingVideoJobs();
+
+			const getRes = await app.request(`/v1/videos/${created.id}`, {
+				headers: {
+					Authorization: "Bearer real-token",
+				},
+			});
+			expect(getRes.status).toBe(200);
+			const jobJson = await getRes.json();
+			expect(jobJson.content).toBeUndefined();
+
+			const contentRes = await app.request(`/v1/videos/${created.id}/content`, {
+				headers: {
+					Authorization: "Bearer real-token",
+				},
+			});
+			expect(contentRes.status).toBe(200);
+			expect(contentRes.headers.get("content-type")).toContain("video/mp4");
+			expect(await contentRes.text()).toBe(
+				`mock-video-${videoJob!.upstreamId}`,
+			);
+		} finally {
+			if (originalGoogleCloudProject !== undefined) {
+				process.env.LLM_GOOGLE_CLOUD_PROJECT = originalGoogleCloudProject;
+			} else {
+				delete process.env.LLM_GOOGLE_CLOUD_PROJECT;
+			}
+			if (originalGoogleVertexRegion !== undefined) {
+				process.env.LLM_GOOGLE_VERTEX_REGION = originalGoogleVertexRegion;
+			} else {
+				delete process.env.LLM_GOOGLE_VERTEX_REGION;
+			}
+			if (originalGoogleVertexVideoOutputBucket !== undefined) {
+				process.env.LLM_GOOGLE_VERTEX_VIDEO_OUTPUT_BUCKET =
+					originalGoogleVertexVideoOutputBucket;
+			} else {
+				delete process.env.LLM_GOOGLE_VERTEX_VIDEO_OUTPUT_BUCKET;
+			}
+			if (originalGoogleVertexSignedUrlBaseUrl !== undefined) {
+				process.env.LLM_GOOGLE_VERTEX_TEST_SIGNED_URL_BASE_URL =
+					originalGoogleVertexSignedUrlBaseUrl;
+			} else {
+				delete process.env.LLM_GOOGLE_VERTEX_TEST_SIGNED_URL_BASE_URL;
 			}
 		}
 	});
@@ -657,7 +779,7 @@ describe("test", () => {
 		);
 	});
 
-	test("/v1/videos rejects unsupported OpenAI video parameters", async () => {
+	test("/v1/videos rejects invalid duration values", async () => {
 		await db.insert(tables.apiKey).values({
 			id: "token-id",
 			token: "real-token",
@@ -675,7 +797,7 @@ describe("test", () => {
 			body: JSON.stringify({
 				model: "veo-3.1-generate-preview",
 				prompt: "A fast moving train in the desert",
-				seconds: 8,
+				seconds: 7,
 			}),
 		});
 

@@ -147,6 +147,7 @@ interface MockVideoJobState {
 	resolution?: string;
 	width?: number;
 	height?: number;
+	storageUri?: string;
 	created_at: number;
 	completed_at: number | null;
 	expires_at: number | null;
@@ -550,6 +551,10 @@ mockOpenAIServer.post(
 				(parameters as Record<string, unknown>).resolution,
 				(parameters as Record<string, unknown>).aspectRatio,
 			);
+			const storageUri =
+				typeof (parameters as Record<string, unknown>).storageUri === "string"
+					? (parameters as Record<string, unknown>).storageUri
+					: undefined;
 			const job: MockVideoJobState = {
 				id: operationName,
 				object: "video",
@@ -557,10 +562,22 @@ mockOpenAIServer.post(
 				status: "queued",
 				progress: 0,
 				size: videoSize.size,
-				duration: 8,
+				duration:
+					typeof (parameters as Record<string, unknown>).durationSeconds ===
+						"number" &&
+					Number.isFinite(
+						(parameters as Record<string, unknown>).durationSeconds,
+					)
+						? ((parameters as Record<string, unknown>)
+								.durationSeconds as number)
+						: 8,
 				resolution: videoSize.resolution,
 				width: videoSize.width,
 				height: videoSize.height,
+				storageUri:
+					typeof storageUri === "string"
+						? `${storageUri.replace(/\/$/, "")}/output.mp4`
+						: undefined,
 				created_at: Math.floor(Date.now() / 1000),
 				completed_at: null,
 				expires_at: null,
@@ -621,12 +638,17 @@ mockOpenAIServer.post(
 				done: true,
 				response: {
 					videos: [
-						{
-							bytesBase64Encoded: Buffer.from(
-								`mock-video-${operationName}`,
-							).toString("base64"),
-							mimeType: "video/mp4",
-						},
+						job.storageUri
+							? {
+									gcsUri: job.storageUri,
+									mimeType: "video/mp4",
+								}
+							: {
+									bytesBase64Encoded: Buffer.from(
+										`mock-video-${operationName}`,
+									).toString("base64"),
+									mimeType: "video/mp4",
+								},
 					],
 				},
 			});
@@ -680,6 +702,23 @@ mockOpenAIServer.get("/v1/videos/:id/content", async (c) => {
 		resolution: job.resolution,
 		width: job.width,
 		height: job.height,
+	});
+});
+
+mockOpenAIServer.get("/mock-gcs/:bucket/*", async (c) => {
+	const bucket = c.req.param("bucket");
+	const objectPath = c.req.path.replace(`/mock-gcs/${bucket}/`, "");
+	const job = [...videoJobs.values()].find(
+		(videoJob) =>
+			typeof videoJob.storageUri === "string" &&
+			videoJob.storageUri === `gs://${bucket}/${objectPath}`,
+	);
+
+	return new Response(`mock-video-${job?.id ?? objectPath}`, {
+		status: 200,
+		headers: {
+			"Content-Type": "video/mp4",
+		},
 	});
 });
 

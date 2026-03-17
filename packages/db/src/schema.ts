@@ -617,6 +617,11 @@ export const videoJob = pgTable(
 			details?: unknown;
 		}>(),
 		contentUrl: text(),
+		storageProvider: text(),
+		storageBucket: text(),
+		storageObjectPath: text(),
+		storageUri: text(),
+		storageExpiresAt: timestamp(),
 		contentType: text(),
 		completedAt: timestamp(),
 		expiresAt: timestamp(),

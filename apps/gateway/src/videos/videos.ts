@@ -28,6 +28,13 @@ import {
 	type Provider,
 	type ProviderModelMapping,
 } from "@llmgateway/models";
+import {
+	buildVertexVideoOutputStorageUri,
+	createSignedGcsReadUrl,
+	getGoogleVertexVideoOutputBucket,
+	getGoogleVertexVideoOutputPrefix,
+	parseGcsUri,
+} from "@llmgateway/shared/gcs";
 
 import type { ServerTypes } from "@/vars.js";
 import type { Context } from "hono";
@@ -39,6 +46,7 @@ const TERMINAL_VIDEO_STATUSES = new Set([
 	"expired",
 ]);
 const MIN_VIDEO_GENERATION_BALANCE = 1;
+const DEFAULT_VIDEO_DURATION_SECONDS = 8;
 const DEFAULT_VIDEO_SIZE = "1280x720";
 const SUPPORTED_VEO_VIDEO_SIZES = {
 	"1280x720": {
@@ -117,7 +125,11 @@ const createVideoRequestSchema = z
 			example: "whsec_test_secret",
 		}),
 		input_reference: z.unknown().optional(),
-		seconds: z.unknown().optional(),
+		seconds: z.number().int().optional().openapi({
+			description:
+				"Output duration in seconds. Veo 3.1 supports 4, 6, or 8 seconds on Google Vertex. Other providers currently only support the default 8-second output.",
+			example: 8,
+		}),
 		n: z.number().int().optional(),
 		image: z.unknown().optional(),
 	})
@@ -154,7 +166,15 @@ const createVideoRequestSchema = z
 			});
 		}
 
-		for (const key of ["input_reference", "seconds", "image"] as const) {
+		if (value.seconds !== undefined && ![4, 6, 8].includes(value.seconds)) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: "seconds must be one of 4, 6, or 8",
+				path: ["seconds"],
+			});
+		}
+
+		for (const key of ["input_reference", "image"] as const) {
 			if (value[key] !== undefined) {
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
@@ -891,6 +911,10 @@ function appendQueryParam(url: string, key: string, value: string): string {
 	return resolvedUrl.toString();
 }
 
+function getVideoDurationSeconds(seconds: number | undefined): number {
+	return seconds ?? DEFAULT_VIDEO_DURATION_SECONDS;
+}
+
 function normalizeVideoStatus(value: unknown): VideoJobRecord["status"] {
 	if (typeof value !== "string") {
 		return "queued";
@@ -1011,6 +1035,36 @@ function extractContentUrl(body: Record<string, unknown>): string | null {
 	return null;
 }
 
+function extractStorageUri(body: Record<string, unknown>): string | null {
+	const candidates = [
+		body.gcsUri,
+		body.storage_uri,
+		body.storageUri,
+		body.output_gcs_uri,
+	];
+
+	for (const candidate of candidates) {
+		if (typeof candidate === "string" && candidate.startsWith("gs://")) {
+			return candidate;
+		}
+	}
+
+	const response =
+		body.response && typeof body.response === "object"
+			? (body.response as Record<string, unknown>)
+			: null;
+	const videos =
+		response && Array.isArray(response.videos) ? response.videos : null;
+	const firstVideo =
+		videos && videos[0] && typeof videos[0] === "object"
+			? (videos[0] as Record<string, unknown>)
+			: null;
+
+	return firstVideo && typeof firstVideo.gcsUri === "string"
+		? firstVideo.gcsUri
+		: null;
+}
+
 function extractError(body: Record<string, unknown>): VideoJobRecord["error"] {
 	const candidate =
 		body.error && typeof body.error === "object"
@@ -1035,7 +1089,30 @@ function toUnixTimestamp(value: Date | null): number | null {
 	return value ? Math.floor(value.getTime() / 1000) : null;
 }
 
-function serializeVideoJob(job: VideoJobRecord) {
+async function getExternalVideoContentUrl(
+	job: VideoJobRecord,
+): Promise<string | null> {
+	if (job.storageUri) {
+		try {
+			return await createSignedGcsReadUrl(job.storageUri);
+		} catch (error) {
+			logger.error(
+				"Failed to create signed URL for video job",
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					videoJobId: job.id,
+					storageUri: job.storageUri,
+				},
+			);
+		}
+	}
+
+	return job.contentUrl;
+}
+
+async function serializeVideoJob(job: VideoJobRecord) {
+	const contentUrl = await getExternalVideoContentUrl(job);
+
 	return {
 		id: job.id,
 		object: "video" as const,
@@ -1050,11 +1127,11 @@ function serializeVideoJob(job: VideoJobRecord) {
 		completed_at: toUnixTimestamp(job.completedAt),
 		expires_at: toUnixTimestamp(job.expiresAt),
 		error: job.error ?? null,
-		content: job.contentUrl
+		content: contentUrl
 			? [
 					{
 						type: "video" as const,
-						url: job.contentUrl,
+						url: contentUrl,
 						mime_type: job.contentType ?? null,
 					},
 				]
@@ -1336,6 +1413,10 @@ async function createGoogleVertexVideoJob(
 	providerMapping: ProviderModelMapping,
 	videoSize: VideoSizeConfig,
 	prompt: string,
+	durationSeconds: number,
+	videoJobId: string,
+	organizationId: string,
+	projectId: string,
 ): Promise<{
 	upstreamId: string;
 	upstreamRequest: Record<string, unknown>;
@@ -1353,6 +1434,16 @@ async function createGoogleVertexVideoJob(
 		providerMapping.modelName,
 		videoSize,
 	);
+	const outputBucket = getGoogleVertexVideoOutputBucket();
+	const outputStorageUri = outputBucket
+		? buildVertexVideoOutputStorageUri({
+				bucket: outputBucket,
+				prefix: getGoogleVertexVideoOutputPrefix(),
+				organizationId,
+				projectId,
+				videoJobId,
+			})
+		: null;
 	const upstreamUrl = joinUrl(
 		providerContext.baseUrl,
 		`/v1/projects/${providerContext.vertexProjectId}/locations/${providerContext.vertexRegion}/publishers/google/models/${upstreamModelName}:predictLongRunning`,
@@ -1370,10 +1461,11 @@ async function createGoogleVertexVideoJob(
 		],
 		parameters: {
 			aspectRatio: getVertexAspectRatio(videoSize),
-			durationSeconds: 8,
+			durationSeconds,
 			generateAudio: true,
 			resolution: getVertexResolution(videoSize),
 			sampleCount: 1,
+			...(outputStorageUri ? { storageUri: outputStorageUri } : {}),
 		},
 	};
 	const rawResponse = await fetchUpstreamJson(authenticatedUpstreamUrl, {
@@ -1401,10 +1493,15 @@ async function createGoogleVertexVideoJob(
 				...rawResponse,
 				name: upstreamId,
 				status: rawResponse.done === true ? "completed" : "queued",
-				duration: 8,
+				duration: durationSeconds,
 				google_vertex_project_id: providerContext.vertexProjectId,
 				google_vertex_region: providerContext.vertexRegion,
 				google_vertex_model_name: upstreamModelName,
+				...(outputStorageUri
+					? {
+							google_vertex_output_storage_uri: outputStorageUri,
+						}
+					: {}),
 			},
 			videoSize,
 		),
@@ -1416,6 +1513,10 @@ async function createUpstreamVideoJob(
 	providerMapping: ProviderModelMapping,
 	videoSize: VideoSizeConfig,
 	prompt: string,
+	durationSeconds: number,
+	videoJobId: string,
+	organizationId: string,
+	projectId: string,
 ): Promise<{
 	upstreamId: string;
 	upstreamRequest: Record<string, unknown>;
@@ -1442,6 +1543,10 @@ async function createUpstreamVideoJob(
 				providerMapping,
 				videoSize,
 				prompt,
+				durationSeconds,
+				videoJobId,
+				organizationId,
+				projectId,
 			);
 		default:
 			throw new HTTPException(500, {
@@ -1458,6 +1563,7 @@ videos.openapi(createVideo, async (c) => {
 		await requireRequestContext(c);
 	const { normalizedModel, requestedProvider } = getVideoModel(request.model);
 	const videoSize = getVideoSizeConfig(request.size);
+	const videoDurationSeconds = getVideoDurationSeconds(request.seconds);
 	const debugMode = isDebugMode(c);
 
 	if (getAvailableCredits(organization) < MIN_VIDEO_GENERATION_BALANCE) {
@@ -1495,18 +1601,36 @@ videos.openapi(createVideo, async (c) => {
 			project,
 			organization.id,
 		);
+	if (
+		providerContext.providerId !== "google-vertex" &&
+		request.seconds !== undefined &&
+		request.seconds !== DEFAULT_VIDEO_DURATION_SECONDS
+	) {
+		throw new HTTPException(400, {
+			message: `Requested duration ${request.seconds}s is not supported for model ${normalizedModel} on ${providerContext.providerId}.`,
+		});
+	}
+
+	const videoId = shortid();
 	const { upstreamId, upstreamRequest, upstreamResponse } =
 		await createUpstreamVideoJob(
 			providerContext,
 			providerMapping,
 			videoSize,
 			request.prompt,
+			videoDurationSeconds,
+			videoId,
+			organization.id,
+			project.id,
 		);
+	const storageUri = extractStorageUri(upstreamResponse);
+	const parsedStorageUri = parseGcsUri(storageUri);
 
 	const initialStatus = normalizeVideoStatus(upstreamResponse.status);
 	const created = await db
 		.insert(tables.videoJob)
 		.values({
+			id: videoId,
 			requestId,
 			organizationId: organization.id,
 			projectId: project.id,
@@ -1525,6 +1649,11 @@ videos.openapi(createVideo, async (c) => {
 			progress: extractProgress(upstreamResponse),
 			error: extractError(upstreamResponse),
 			contentUrl: extractContentUrl(upstreamResponse),
+			storageProvider: parsedStorageUri ? "gcs" : null,
+			storageBucket: parsedStorageUri?.bucket ?? null,
+			storageObjectPath: parsedStorageUri?.objectPath ?? null,
+			storageUri,
+			storageExpiresAt: null,
 			contentType:
 				typeof upstreamResponse.mime_type === "string"
 					? upstreamResponse.mime_type
@@ -1560,14 +1689,14 @@ videos.openapi(createVideo, async (c) => {
 		usedProvider: providerContext.providerId,
 	});
 
-	return c.json(serializeVideoJob(created));
+	return c.json(await serializeVideoJob(created));
 });
 
 videos.openapi(getVideo, async (c) => {
 	const { project } = await requireRequestContext(c);
 	const { video_id: videoId } = c.req.valid("param");
 	const job = await requireVideoJobForProject(project.id, videoId);
-	return c.json(serializeVideoJob(job));
+	return c.json(await serializeVideoJob(job));
 });
 
 videos.openapi(getVideoContent, async (c) => {
@@ -1581,7 +1710,7 @@ videos.openapi(getVideoContent, async (c) => {
 		});
 	}
 
-	if (!job.contentUrl) {
+	if (!job.contentUrl && !job.storageUri) {
 		const inlineVideo = getGoogleVertexInlineVideo(job);
 		if (!inlineVideo) {
 			throw new HTTPException(404, {
@@ -1600,7 +1729,27 @@ videos.openapi(getVideoContent, async (c) => {
 		});
 	}
 
-	const upstreamResponse = await fetch(job.contentUrl);
+	const contentUrl = job.contentUrl ?? (await getExternalVideoContentUrl(job));
+	if (!contentUrl) {
+		const inlineVideo = getGoogleVertexInlineVideo(job);
+		if (inlineVideo) {
+			const bytes = Uint8Array.from(
+				Buffer.from(inlineVideo.bytesBase64Encoded, "base64"),
+			);
+			return new Response(bytes, {
+				status: 200,
+				headers: {
+					"Content-Type": inlineVideo.mimeType,
+				},
+			});
+		}
+
+		throw new HTTPException(404, {
+			message: "Video content is not available",
+		});
+	}
+
+	const upstreamResponse = await fetch(contentUrl);
 	if (!upstreamResponse.ok || !upstreamResponse.body) {
 		throw new HTTPException(502, {
 			message: "Failed to fetch video content from upstream provider",

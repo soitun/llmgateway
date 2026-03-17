@@ -14,6 +14,11 @@ import {
 } from "@llmgateway/db";
 import { logger } from "@llmgateway/logger";
 import { models, type ProviderModelMapping } from "@llmgateway/models";
+import {
+	createSignedGcsReadUrl,
+	getVideoStorageExpiryDate,
+	parseGcsUri,
+} from "@llmgateway/shared/gcs";
 
 const MAX_WEBHOOK_ATTEMPTS = 8;
 const WEBHOOK_BASE_DELAY_MS = 30_000;
@@ -198,6 +203,36 @@ function extractContentUrl(body: Record<string, unknown>): string | null {
 	return null;
 }
 
+function extractStorageUri(body: Record<string, unknown>): string | null {
+	const candidates = [
+		body.gcsUri,
+		body.storage_uri,
+		body.storageUri,
+		body.output_gcs_uri,
+	];
+
+	for (const candidate of candidates) {
+		if (typeof candidate === "string" && candidate.startsWith("gs://")) {
+			return candidate;
+		}
+	}
+
+	const response =
+		body.response && typeof body.response === "object"
+			? (body.response as Record<string, unknown>)
+			: null;
+	const videos =
+		response && Array.isArray(response.videos) ? response.videos : null;
+	const firstVideo =
+		videos && videos[0] && typeof videos[0] === "object"
+			? (videos[0] as Record<string, unknown>)
+			: null;
+
+	return firstVideo && typeof firstVideo.gcsUri === "string"
+		? firstVideo.gcsUri
+		: null;
+}
+
 function extractError(body: Record<string, unknown>): VideoJobRecord["error"] {
 	const candidate =
 		body.error && typeof body.error === "object"
@@ -222,7 +257,30 @@ function toUnixTimestamp(value: Date | null): number | null {
 	return value ? Math.floor(value.getTime() / 1000) : null;
 }
 
-function serializeVideoJob(job: VideoJobRecord) {
+async function getExternalVideoContentUrl(
+	job: VideoJobRecord,
+): Promise<string | null> {
+	if (job.storageUri) {
+		try {
+			return await createSignedGcsReadUrl(job.storageUri);
+		} catch (error) {
+			logger.error(
+				"Failed to create signed URL for video job",
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					videoJobId: job.id,
+					storageUri: job.storageUri,
+				},
+			);
+		}
+	}
+
+	return job.contentUrl;
+}
+
+async function serializeVideoJob(job: VideoJobRecord) {
+	const contentUrl = await getExternalVideoContentUrl(job);
+
 	return {
 		id: job.id,
 		object: "video" as const,
@@ -236,11 +294,11 @@ function serializeVideoJob(job: VideoJobRecord) {
 		completed_at: toUnixTimestamp(job.completedAt),
 		expires_at: toUnixTimestamp(job.expiresAt),
 		error: job.error ?? null,
-		content: job.contentUrl
+		content: contentUrl
 			? [
 					{
 						type: "video" as const,
-						url: job.contentUrl,
+						url: contentUrl,
 						mime_type: job.contentType ?? null,
 					},
 				]
@@ -381,6 +439,31 @@ function getRequestedVideoMetadata(job: VideoJobRecord): {
 	};
 }
 
+function getRequestedVideoDurationSeconds(job: VideoJobRecord): number | null {
+	for (const candidate of getVideoMetadataCandidates(job)) {
+		for (const key of [
+			"duration",
+			"duration_seconds",
+			"durationSeconds",
+			"seconds",
+		]) {
+			const value = readNestedValue(candidate, key);
+			if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+				return value;
+			}
+
+			if (typeof value === "string" && value.length > 0) {
+				const parsed = Number(value);
+				if (!Number.isNaN(parsed) && parsed > 0) {
+					return parsed;
+				}
+			}
+		}
+	}
+
+	return null;
+}
+
 function addRequestedVideoMetadata(
 	job: VideoJobRecord,
 	body: Record<string, unknown>,
@@ -411,7 +494,7 @@ function addRequestedVideoMetadata(
 		duration:
 			typeof body.duration === "number" && Number.isFinite(body.duration)
 				? body.duration
-				: 8,
+				: (getRequestedVideoDurationSeconds(job) ?? 8),
 	};
 }
 
@@ -786,6 +869,7 @@ function normalizeGoogleVertexOperation(
 		progress: status === "completed" || status === "failed" ? 100 : 50,
 		url: gcsUri,
 		output_url: gcsUri,
+		storage_uri: gcsUri,
 		mime_type: mimeType,
 		error,
 	});
@@ -830,31 +914,7 @@ async function fetchGoogleVertexStatus(
 }
 
 function extractVideoDurationSeconds(job: VideoJobRecord): number | null {
-	for (const candidate of getVideoMetadataCandidates(job)) {
-		for (const key of [
-			"duration",
-			"duration_seconds",
-			"durationSeconds",
-			"seconds",
-		]) {
-			const value = readNestedValue(candidate, key);
-			if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-				return value;
-			}
-
-			if (typeof value === "string" && value.length > 0) {
-				const match = value.match(/(\d+(?:\.\d+)?)/);
-				if (match) {
-					const parsed = Number(match[1]);
-					if (!Number.isNaN(parsed) && parsed > 0) {
-						return parsed;
-					}
-				}
-			}
-		}
-	}
-
-	return null;
+	return getRequestedVideoDurationSeconds(job);
 }
 
 function is4kVideo(job: VideoJobRecord): boolean {
@@ -964,7 +1024,7 @@ async function finalizeVideoJob(job: VideoJobRecord): Promise<void> {
 			.then((rows) => rows[0]);
 		const videoOutputCost =
 			currentJob.status === "completed" ? getVideoOutputCost(currentJob) : 0;
-		const responsePayload = serializeVideoJob(currentJob);
+		const responsePayload = await serializeVideoJob(currentJob);
 		const responseSize = JSON.stringify(responsePayload).length;
 		const messages =
 			organization?.retentionLevel === "retain"
@@ -989,8 +1049,8 @@ async function finalizeVideoJob(job: VideoJobRecord): Promise<void> {
 			usedProvider: currentJob.usedProvider,
 			responseSize,
 			content:
-				currentJob.status === "completed" && currentJob.contentUrl
-					? currentJob.contentUrl
+				currentJob.status === "completed" && responsePayload.content?.[0]?.url
+					? responsePayload.content[0].url
 					: null,
 			finishReason:
 				currentJob.status === "completed" ? "completed" : "upstream_error",
@@ -1182,6 +1242,9 @@ export async function processPendingVideoJobs(): Promise<void> {
 			const completedAt =
 				parseTimestamp(enrichedUpstreamStatus.completed_at) ??
 				(isTerminal ? new Date() : job.completedAt);
+			const storageUri =
+				extractStorageUri(enrichedUpstreamStatus) ?? job.storageUri;
+			const parsedStorageUri = parseGcsUri(storageUri);
 
 			const updatedJob = await db
 				.update(tables.videoJob)
@@ -1191,6 +1254,18 @@ export async function processPendingVideoJobs(): Promise<void> {
 					error: extractError(enrichedUpstreamStatus),
 					contentUrl:
 						extractContentUrl(enrichedUpstreamStatus) ?? job.contentUrl,
+					storageProvider:
+						parsedStorageUri || job.storageProvider === "gcs"
+							? "gcs"
+							: job.storageProvider,
+					storageBucket: parsedStorageUri?.bucket ?? job.storageBucket,
+					storageObjectPath:
+						parsedStorageUri?.objectPath ?? job.storageObjectPath,
+					storageUri,
+					storageExpiresAt:
+						parsedStorageUri && !job.storageExpiresAt
+							? getVideoStorageExpiryDate()
+							: job.storageExpiresAt,
 					contentType:
 						typeof enrichedUpstreamStatus.mime_type === "string"
 							? enrichedUpstreamStatus.mime_type
@@ -1285,7 +1360,7 @@ async function deliverWebhook(
 		id: delivery.eventId,
 		type: delivery.eventType,
 		created_at: Math.floor(Date.now() / 1000),
-		data: serializeVideoJob(job),
+		data: await serializeVideoJob(job),
 	});
 
 	const headers = {

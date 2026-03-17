@@ -6,6 +6,7 @@ BASE_URL="https://api.llmgateway.io"
 API_KEY="${LLM_GATEWAY_API_KEY:-test-token}"
 MODEL="veo-3.1-generate-preview"
 SIZE=""
+DURATION=""
 PROMPT=""
 OUTPUT=""
 POLL_INTERVAL="5"
@@ -14,7 +15,7 @@ CALLBACK_SECRET=""
 PROMPT_ARGS=""
 
 usage() {
-	echo "Usage: $0 [--local] [--model MODEL] [--size WIDTHxHEIGHT] [--output FILE] [--interval SECONDS] [--callback-url URL --callback-secret SECRET] <prompt>" >&2
+	echo "Usage: $0 [--local] [--model MODEL] [--size WIDTHxHEIGHT] [--duration SECONDS] [--output FILE] [--interval SECONDS] [--callback-url URL --callback-secret SECRET] <prompt>" >&2
 	exit 1
 }
 
@@ -46,6 +47,11 @@ while [ "$#" -gt 0 ]; do
 		--size)
 			[ "$#" -ge 2 ] || usage
 			SIZE="$2"
+			shift 2
+			;;
+		--duration)
+			[ "$#" -ge 2 ] || usage
+			DURATION="$2"
 			shift 2
 			;;
 		--output)
@@ -116,6 +122,7 @@ PAYLOAD=$(
 	jq -n \
 		--arg model "$MODEL" \
 		--arg size "$SIZE" \
+		--arg duration "$DURATION" \
 		--arg prompt "$PROMPT" \
 		--arg callback_url "$CALLBACK_URL" \
 		--arg callback_secret "$CALLBACK_SECRET" \
@@ -127,6 +134,15 @@ PAYLOAD=$(
 			if $size != "" then
 				{
 					size: $size
+				}
+			else
+				{}
+			end
+		)
+		+ (
+			if $duration != "" then
+				{
+					seconds: ($duration | tonumber)
 				}
 			else
 				{}
@@ -145,7 +161,7 @@ PAYLOAD=$(
 )
 
 log "Creating video job"
-log "base_url=${BASE_URL} model=${MODEL} size=${SIZE:-default}"
+log "base_url=${BASE_URL} model=${MODEL} size=${SIZE:-default} duration=${DURATION:-default}"
 CREATE_STATUS=$(
 	curl -sS \
 		-o "$CREATE_RESPONSE_FILE" \

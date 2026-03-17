@@ -13,6 +13,7 @@ import {
 	errorDetails,
 	gt,
 	gte,
+	type InferSelectModel,
 	inArray,
 	lt,
 	lte,
@@ -23,10 +24,64 @@ import {
 	toolResults,
 	tools,
 } from "@llmgateway/db";
+import { createSignedGcsReadUrl } from "@llmgateway/shared/gcs";
 
 import type { ServerTypes } from "@/vars.js";
 
 export const logs = new OpenAPIHono<ServerTypes>();
+
+type LogRecord = InferSelectModel<typeof tables.log>;
+
+async function enrichLogsWithVideoContentUrls<T extends LogRecord>(
+	logEntries: T[],
+): Promise<T[]> {
+	const vertexVideoLogs = logEntries.filter(
+		(log) => log.usedProvider === "google-vertex",
+	);
+	if (vertexVideoLogs.length === 0) {
+		return logEntries;
+	}
+
+	const requestIds = vertexVideoLogs
+		.map((log) => log.requestId)
+		.filter((requestId, index, values) => values.indexOf(requestId) === index);
+	if (requestIds.length === 0) {
+		return logEntries;
+	}
+
+	const videoJobs = await db
+		.select({
+			requestId: tables.videoJob.requestId,
+			contentUrl: tables.videoJob.contentUrl,
+			storageUri: tables.videoJob.storageUri,
+		})
+		.from(tables.videoJob)
+		.where(inArray(tables.videoJob.requestId, requestIds));
+
+	const contentByRequestId = new Map<string, string>();
+	for (const videoJob of videoJobs) {
+		if (videoJob.storageUri) {
+			try {
+				const signedUrl = await createSignedGcsReadUrl(videoJob.storageUri);
+				if (signedUrl) {
+					contentByRequestId.set(videoJob.requestId, signedUrl);
+					continue;
+				}
+			} catch {
+				// Ignore signed URL generation failures and fall back to stored content.
+			}
+		}
+
+		if (videoJob.contentUrl) {
+			contentByRequestId.set(videoJob.requestId, videoJob.contentUrl);
+		}
+	}
+
+	return logEntries.map((log) => {
+		const content = contentByRequestId.get(log.requestId);
+		return content ? { ...log, content } : log;
+	});
+}
 
 // Use the log schema directly from the database
 // Using z.object directly instead of createSelectSchema due to compatibility issues
@@ -169,7 +224,8 @@ logs.openapi(getById, async (c) => {
 		});
 	}
 
-	return c.json({ log });
+	const [enrichedLog] = await enrichLogsWithVideoContentUrls([log]);
+	return c.json({ log: enrichedLog });
 });
 
 const querySchema = z.object({
@@ -581,7 +637,7 @@ logs.openapi(get, async (c) => {
 	// Return the logs directly without any modifications
 
 	return c.json({
-		logs: paginatedLogs,
+		logs: await enrichLogsWithVideoContentUrls(paginatedLogs),
 		pagination: {
 			nextCursor,
 			hasMore,
