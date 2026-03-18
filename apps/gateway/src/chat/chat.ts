@@ -3277,7 +3277,10 @@ chat.openapi(completions, async (c) => {
 					response_format?.type === "json_object" ||
 					response_format?.type === "json_schema";
 				const shouldBufferForHealing =
-					streamingResponseHealingEnabled && streamingIsJsonResponseFormat;
+					streamingIsJsonResponseFormat &&
+					(streamingResponseHealingEnabled === true ||
+						usedProvider === "novita" ||
+						usedProvider === "minimax");
 
 				// Buffer for storing chunks when healing is enabled
 				// We need to buffer content, track last chunk info, and replay healed content at the end
@@ -3715,12 +3718,14 @@ chat.openapi(completions, async (c) => {
 									});
 								}
 
-								await writeSSEAndCache({
-									event: "done",
-									data: "[DONE]",
-									id: String(eventId++),
-								});
-								doneSent = true;
+								if (!shouldBufferForHealing) {
+									await writeSSEAndCache({
+										event: "done",
+										data: "[DONE]",
+										id: String(eventId++),
+									});
+									doneSent = true;
+								}
 
 								processedLength = eventEnd;
 							} else {
@@ -3988,7 +3993,10 @@ chat.openapi(completions, async (c) => {
 								}
 
 								// Extract usage data from transformedData to update tracking variables
-								if (transformedData.usage && usedProvider === "openai") {
+								if (
+									transformedData.usage &&
+									(usedProvider === "openai" || usedProvider === "azure")
+								) {
 									const usage = transformedData.usage;
 									if (
 										usage.prompt_tokens !== undefined &&
@@ -4122,8 +4130,11 @@ chat.openapi(completions, async (c) => {
 									}
 								}
 
-								// Extract and accumulate tool calls
-								const toolCallsChunk = extractToolCalls(data, usedProvider);
+								const toolCallsChunk = extractToolCalls(
+									data,
+									usedProvider,
+									transformedData,
+								);
 								if (toolCallsChunk && toolCallsChunk.length > 0) {
 									streamingToolCalls ??= [];
 									// Merge tool calls (accumulating function arguments)
@@ -5994,7 +6005,6 @@ chat.openapi(completions, async (c) => {
 		webSearchCount,
 	} = parsedResponse;
 
-	// Apply response healing if enabled and response_format is json_object or json_schema
 	const responseHealingEnabled = plugins?.some(
 		(p) => p.id === "response-healing",
 	);
@@ -6010,7 +6020,13 @@ chat.openapi(completions, async (c) => {
 		};
 	} = {};
 
-	if (responseHealingEnabled && isJsonResponseFormat && content) {
+	const shouldHealNonStreaming =
+		isJsonResponseFormat &&
+		(responseHealingEnabled === true ||
+			usedProvider === "novita" ||
+			usedProvider === "minimax");
+
+	if (shouldHealNonStreaming && content) {
 		const healingResult = healJsonResponse(content);
 		pluginResults.responseHealing = {
 			healed: healingResult.healed,
