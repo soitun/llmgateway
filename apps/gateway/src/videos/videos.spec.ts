@@ -422,9 +422,9 @@ describe("videos", () => {
 			]);
 
 			await setRoutingMetrics("veo-3.1-generate-preview", "avalanche", {
-				uptime: 92,
-				latency: 180,
-				throughput: 80,
+				uptime: 70,
+				latency: 300,
+				throughput: 50,
 			});
 			await setRoutingMetrics("veo-3.1-generate-preview", "google-vertex", {
 				uptime: 99.9,
