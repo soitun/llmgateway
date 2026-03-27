@@ -612,28 +612,41 @@ chat.openapi(completions, async (c) => {
 		requestedModel,
 		parseResult.requestedProvider,
 	);
-	let modelInfo = {
-		...modelInfoResult.modelInfo,
-		providers: expandAllProviderRegions(modelInfoResult.modelInfo.providers),
-	};
-	let allModelProviders = expandAllProviderRegions(
+	const useExpandedRoutingProviders =
+		Boolean(modelInfoResult.requestedProvider) &&
+		modelInfoResult.requestedProvider !== "llmgateway" &&
+		modelInfoResult.requestedProvider !== "custom";
+	const expandedActiveModelProviders = expandAllProviderRegions(
+		modelInfoResult.modelInfo.providers,
+	);
+	const expandedAllModelProviders = expandAllProviderRegions(
 		modelInfoResult.allModelProviders,
 	);
+	let modelInfo = {
+		...modelInfoResult.modelInfo,
+		providers: useExpandedRoutingProviders
+			? expandedActiveModelProviders
+			: modelInfoResult.modelInfo.providers,
+	};
+	let allModelProviders = useExpandedRoutingProviders
+		? expandedAllModelProviders
+		: modelInfoResult.allModelProviders;
 	let requestedProvider = modelInfoResult.requestedProvider;
 
 	// If a specific region was requested (e.g. "alibaba/qwen-plus:cn-beijing"),
 	// filter providers to only those matching the requested region
 	if (requestedRegion) {
-		modelInfo = {
-			...modelInfo,
-			providers: modelInfo.providers.filter(
-				(p) => p.region === requestedRegion,
-			),
-		};
-		allModelProviders = allModelProviders.filter(
+		const regionProviders = expandedActiveModelProviders.filter(
 			(p) => p.region === requestedRegion,
 		);
-		if (modelInfo.providers.length === 0) {
+		modelInfo = {
+			...modelInfo,
+			providers: regionProviders,
+		};
+		allModelProviders = expandedAllModelProviders.filter(
+			(p) => p.region === requestedRegion,
+		);
+		if (regionProviders.length === 0) {
 			throw new HTTPException(400, {
 				message: `Region '${requestedRegion}' is not available for model ${requestedModel}`,
 			});
@@ -1149,15 +1162,16 @@ chat.openapi(completions, async (c) => {
 			}
 			const candidateAllowedProviders = candidateIam.allowedProviders;
 
-			// Expand region entries into separate candidates for scoring
-			const expandedCandidateProviders =
+			// Use the root mappings for provider-agnostic routing. Region-specific
+			// expansion is only needed when a provider is explicitly requested.
+			const candidateProviders =
 				project.mode === "credits"
 					? filterRegionsByAvailableKeys(
-							expandAllProviderRegions(modelDef.providers),
+							modelDef.providers as ProviderModelMapping[],
 						)
-					: expandAllProviderRegions(modelDef.providers);
+					: (modelDef.providers as ProviderModelMapping[]);
 			// Check if any of the model's providers are available
-			const availableModelProviders = expandedCandidateProviders.filter(
+			const availableModelProviders = candidateProviders.filter(
 				(provider) =>
 					availableProviders.includes(provider.providerId) &&
 					(!candidateAllowedProviders ||
@@ -1308,7 +1322,7 @@ chat.openapi(completions, async (c) => {
 			if (fallbackModelDef) {
 				modelInfo = {
 					...fallbackModelDef,
-					providers: expandAllProviderRegions(fallbackModelDef.providers),
+					providers: fallbackModelDef.providers,
 				};
 			}
 		}
@@ -1354,6 +1368,13 @@ chat.openapi(completions, async (c) => {
 		const sameProviderMappings = modelInfo.providers.filter(
 			(p) => p.providerId === usedProvider,
 		);
+		const sameProviderRegionalMappings = sameProviderMappings.filter(
+			(p) => p.region,
+		);
+		const sameProviderRoutingMappings =
+			sameProviderRegionalMappings.length > 0
+				? sameProviderRegionalMappings
+				: sameProviderMappings;
 
 		if (sameProviderMappings.length > 1) {
 			let lockedRegion = usedRegion;
@@ -1376,7 +1397,7 @@ chat.openapi(completions, async (c) => {
 				? new Map([[usedProvider, lockedRegion]])
 				: undefined;
 			const eligibleMappings = filterEligibleModelProviders(
-				sameProviderMappings,
+				sameProviderRoutingMappings,
 				{
 					allProviderVariants: modelInfo.providers,
 					providerLockedRegions,
@@ -1422,7 +1443,7 @@ chat.openapi(completions, async (c) => {
 		}
 
 		if (!usedRegion) {
-			const firstRegionalMatch = sameProviderMappings.find(
+			const firstRegionalMatch = sameProviderRoutingMappings.find(
 				(p) => (p as ProviderModelMapping).region,
 			) as ProviderModelMapping | undefined;
 			if (firstRegionalMatch) {
@@ -1774,10 +1795,16 @@ chat.openapi(completions, async (c) => {
 			const providerLockedRegions = explicitDirectRegion
 				? new Map([[requestedProvider, explicitDirectRegion]])
 				: undefined;
+			const directProviderMappings = allModelProviders.filter(
+				(provider) => provider.providerId === requestedProvider,
+			);
+			const directProviderRegionalMappings = directProviderMappings.filter(
+				(provider) => provider.region,
+			);
 			routingMetadataProviders = filterEligibleModelProviders(
-				allModelProviders.filter(
-					(provider) => provider.providerId === requestedProvider,
-				),
+				directProviderRegionalMappings.length > 0
+					? directProviderRegionalMappings
+					: directProviderMappings,
 				{
 					allProviderVariants: modelInfo.providers,
 					providerLockedRegions,

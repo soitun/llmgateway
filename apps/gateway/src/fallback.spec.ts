@@ -919,6 +919,52 @@ describe("fallback and error status code handling", () => {
 			]);
 		});
 
+		test("provider-agnostic routing keeps regional mappings aggregated", async () => {
+			await setupKeys("alibaba");
+
+			await setRoutingMetrics("deepseek-v3.2", "alibaba", 99, {
+				routingLatency: 950,
+				routingThroughput: 15,
+			});
+			await setRoutingMetrics("deepseek-v3.2", "alibaba", 100, {
+				region: "singapore",
+				routingLatency: 1200,
+				routingThroughput: 10,
+			});
+			await setRoutingMetrics("deepseek-v3.2", "alibaba", 100, {
+				region: "cn-beijing",
+				routingLatency: 900,
+				routingThroughput: 20,
+			});
+
+			const res = await app.request("/v1/chat/completions", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: "Bearer real-token",
+				},
+				body: JSON.stringify({
+					model: "deepseek-v3.2",
+					messages: [{ role: "user", content: "Hello!" }],
+				}),
+			});
+
+			expect(res.status).toBe(200);
+
+			const logs = await waitForLogs(1);
+			expect(logs[0].routingMetadata?.providerScores).toEqual([
+				expect.objectContaining({
+					providerId: "alibaba",
+					score: expect.any(Number),
+				}),
+			]);
+			expect(
+				logs[0].routingMetadata?.providerScores?.some(
+					(score) => score.providerId === "alibaba" && Boolean(score.region),
+				),
+			).toBe(false);
+		});
+
 		test("successful request stores routing metadata with selection reason in DB log", async () => {
 			await setupKeys("openai");
 
