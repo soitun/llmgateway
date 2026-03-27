@@ -29,9 +29,7 @@ APP_ENDPOINTS["admin"]="http://localhost:3006"
 # Health check routes for each app (optional)
 declare -A HEALTH_ROUTES
 HEALTH_ROUTES["docs"]="/v1_chat_completions"
-# Add more health check routes for other apps as needed
-# HEALTH_ROUTES["api"]="/health"
-# HEALTH_ROUTES["gateway"]="/health"
+HEALTH_ROUTES["admin"]="/api/health"
 
 # Array to store test results
 declare -A RESULTS
