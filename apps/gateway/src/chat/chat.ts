@@ -163,6 +163,21 @@ function filterRegionsByAvailableKeys(
 	});
 }
 
+function preferConcreteRegionalMappings(
+	providers: ProviderModelMapping[],
+): ProviderModelMapping[] {
+	const providersWithRegions = new Set(
+		providers
+			.filter((mapping) => mapping.region)
+			.map((mapping) => mapping.providerId),
+	);
+
+	return providers.filter(
+		(mapping) =>
+			!providersWithRegions.has(mapping.providerId) || Boolean(mapping.region),
+	);
+}
+
 function resolveRegionFromProviderKey(
 	key: InferSelectModel<typeof tables.providerKey>,
 ): string | undefined {
@@ -1503,45 +1518,45 @@ chat.openapi(completions, async (c) => {
 				// Filter model providers to only those available (excluding the low-uptime one)
 				// If web search is requested, also filter to providers that support it
 				// If JSON output is requested, also filter to providers that support it
-				const availableModelProviders = iamFilteredModelProviders.filter(
-					(provider) => {
-						if (!availableProviders.includes(provider.providerId)) {
+				const availableModelProviders = preferConcreteRegionalMappings(
+					iamFilteredModelProviders,
+				).filter((provider) => {
+					if (!availableProviders.includes(provider.providerId)) {
+						return false;
+					}
+					if (
+						provider.providerId === usedProvider &&
+						provider.region === usedRegion
+					) {
+						return false;
+					}
+					// If web search tool is requested, only include providers that support it
+					if (webSearchTool) {
+						if (provider.webSearch !== true) {
 							return false;
 						}
-						if (
-							provider.providerId === usedProvider &&
-							provider.region === usedRegion
-						) {
+					}
+					// If JSON output is requested, only include providers that support it
+					if (
+						response_format?.type === "json_object" ||
+						response_format?.type === "json_schema"
+					) {
+						if (provider.jsonOutput !== true) {
 							return false;
 						}
-						// If web search tool is requested, only include providers that support it
-						if (webSearchTool) {
-							if (provider.webSearch !== true) {
-								return false;
-							}
-						}
-						// If JSON output is requested, only include providers that support it
-						if (
-							response_format?.type === "json_object" ||
-							response_format?.type === "json_schema"
-						) {
-							if (provider.jsonOutput !== true) {
-								return false;
-							}
-						}
-						// If JSON schema output is requested, only include providers that support it
-						if (response_format?.type === "json_schema") {
-							if (provider.jsonOutputSchema !== true) {
-								return false;
-							}
-						}
-						// If images are present in messages, only include providers that support vision
-						if (hasImages && provider.vision !== true) {
+					}
+					// If JSON schema output is requested, only include providers that support it
+					if (response_format?.type === "json_schema") {
+						if (provider.jsonOutputSchema !== true) {
 							return false;
 						}
-						return true;
-					},
-				);
+					}
+					// If images are present in messages, only include providers that support vision
+					if (hasImages && provider.vision !== true) {
+						return false;
+					}
+					return true;
+				});
 
 				if (availableModelProviders.length > 0) {
 					const rawModelForFallback = models.find((m) => m.id === baseModelId);
@@ -1678,7 +1693,7 @@ chat.openapi(completions, async (c) => {
 
 			// Filter model providers to only those eligible for this request
 			const availableModelProviders = filterEligibleModelProviders(
-				iamFilteredModelProviders,
+				preferConcreteRegionalMappings(iamFilteredModelProviders),
 				{
 					allProviderVariants: modelInfo.providers,
 					availableProviders,
@@ -1894,6 +1909,12 @@ chat.openapi(completions, async (c) => {
 	// Update baseModelName to match the final usedModel after routing
 	// Find the model definition that corresponds to the final usedModel
 	let finalModelInfo: ModelDefinition | undefined;
+	usedRegion ??= (
+		modelInfo.providers.find(
+			(p) => p.providerId === usedProvider && p.modelName === usedModel,
+		) as ProviderModelMapping | undefined
+	)?.region;
+
 	if (usedProvider === "custom") {
 		finalModelInfo = {
 			id: usedModel,
