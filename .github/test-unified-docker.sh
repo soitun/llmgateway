@@ -134,7 +134,7 @@ test_service() {
   # Test endpoint
   local response_code=$(curl -s -o /dev/null -w "%{http_code}" "$endpoint" || echo "000")
 
-  if [ "$response_code" = "200" ] || [ "$response_code" = "301" ] || [ "$response_code" = "302" ]; then
+  if [ "$response_code" = "200" ] || [ "$response_code" = "301" ] || [ "$response_code" = "302" ] || [ "$response_code" = "307" ]; then
     echo -e "${GREEN}✓ $app endpoint test passed (HTTP $response_code)${NC}"
     RESULTS["$app"]="PASS"
     return 0
