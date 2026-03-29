@@ -149,6 +149,7 @@ export const organization = pgTable("organization", {
 	referralEarnings: decimal().notNull().default("0"),
 	paymentFailureCount: integer().notNull().default(0),
 	lastPaymentFailureAt: timestamp(),
+	paymentFailureStartedAt: timestamp(),
 	// Dev Plans fields (for personal accounts)
 	isPersonal: boolean().notNull().default(false),
 	devPlan: text({
@@ -1186,6 +1187,8 @@ export const auditLogActions = [
 	"payment.method.set_default",
 	"payment.method.delete",
 	"payment.credit_topup",
+	"payment.auto_topup.update",
+	"payment.auto_topup.disable",
 	// Credits
 	"credits.gift",
 	// Dev Plan
