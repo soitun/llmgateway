@@ -286,12 +286,20 @@ export default async function ProjectModelProviderMappingsPage({
 											</div>
 										</TableCell>
 										<TableCell>
-											<Link
-												href={`/models/${encodeURIComponent(m.modelId)}?projectId=${projectId}`}
-												className="font-medium hover:underline"
-											>
-												{m.modelId}
-											</Link>
+											{(() => {
+												// Strip provider prefix (e.g. "embercloud/gpt-4o-mini" → "gpt-4o-mini")
+												const bareModelId = m.modelId.includes("/")
+													? m.modelId.split("/").slice(1).join("/")
+													: m.modelId;
+												return (
+													<Link
+														href={`/models/${encodeURIComponent(bareModelId)}?projectId=${projectId}`}
+														className="font-medium hover:underline"
+													>
+														{bareModelId}
+													</Link>
+												);
+											})()}
 										</TableCell>
 										<TableCell className="tabular-nums">
 											{formatNumber(m.logsCount)}

@@ -13,20 +13,24 @@ export default async function ModelDetailPage({
 	searchParams,
 }: {
 	params: Promise<{ modelId: string }>;
-	searchParams?: Promise<{ projectId?: string }>;
+	searchParams?: Promise<{ projectId?: string; window?: string }>;
 }) {
 	await requireSession();
 
 	const { modelId } = await params;
 	const searchParamsData = await searchParams;
 	const projectId = searchParamsData?.projectId;
+	const window = searchParamsData?.window;
 	const decodedModelId = decodeURIComponent(modelId);
 
 	const $api = await createServerApiClient();
 	const { data } = await $api.GET("/admin/models/{modelId}", {
 		params: {
 			path: { modelId: encodeURIComponent(decodedModelId) },
-			query: projectId ? ({ projectId } as any) : undefined,
+			query: {
+				...(projectId ? { projectId } : {}),
+				...(window ? { window } : {}),
+			} as any,
 		},
 	});
 
