@@ -55,11 +55,20 @@ export default async function Page(props: {
 		notFound();
 	}
 
-	const time = await getGithubLastEdit({
-		owner: "theopenco",
-		repo: "llmgateway",
-		path: `apps/docs/content/${page.path}`,
-	});
+	let time: Date | null = null;
+	try {
+		time = await getGithubLastEdit({
+			owner: "theopenco",
+			repo: "llmgateway",
+			path: `apps/docs/content/${page.path}`,
+		});
+	} catch (error: unknown) {
+		const message = error instanceof Error ? error.message : String(error);
+		const isRateLimit = message.includes("rate limit");
+		if (!isRateLimit) {
+			throw error;
+		}
+	}
 
 	const MDXContent = page.data.body;
 

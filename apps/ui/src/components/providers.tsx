@@ -2,7 +2,9 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { Crisp } from "crisp-sdk-web";
 import { ThemeProvider } from "next-themes";
+import posthog from "posthog-js";
 import { PostHogProvider } from "posthog-js/react";
 import { Suspense, useMemo, useEffect } from "react";
 import { Toaster as SonnerToaster } from "sonner";
@@ -13,7 +15,6 @@ import { toast } from "@/lib/components/use-toast";
 import { AppConfigProvider } from "@/lib/config";
 
 import type { AppConfig } from "@/lib/config-server";
-import type { PostHogConfig } from "posthog-js";
 import type { ReactNode } from "react";
 
 interface ProvidersProps {
@@ -61,20 +62,43 @@ export function Providers({ children, config }: ProvidersProps) {
 		[],
 	);
 
-	const posthogOptions: Partial<PostHogConfig> | undefined = {
-		api_host: config.posthogHost,
-		capture_pageview: "history_change",
-		autocapture: true,
-	};
-
-	// Set up Crisp if configured
+	// Defer PostHog initialization to reduce TBT
 	useEffect(() => {
-		if (config.crispId) {
-			// Dynamically import Crisp to avoid SSR issues
-			void import("crisp-sdk-web").then(({ Crisp }) => {
-				Crisp.configure(config.crispId!);
-			});
+		if (!config.posthogKey) {
+			return;
 		}
+		const key = config.posthogKey;
+		const host = config.posthogHost;
+		const init = () => {
+			posthog.init(key, {
+				api_host: host,
+				capture_pageview: "history_change",
+				autocapture: true,
+			});
+		};
+		if (typeof requestIdleCallback !== "undefined") {
+			const id = requestIdleCallback(init);
+			return () => cancelIdleCallback(id);
+		}
+		const timer = setTimeout(init, 1000);
+		return () => clearTimeout(timer);
+	}, [config.posthogKey, config.posthogHost]);
+
+	// Defer Crisp loading to reduce TBT
+	useEffect(() => {
+		if (!config.crispId) {
+			return;
+		}
+		const id = config.crispId;
+		const load = () => {
+			Crisp.configure(id);
+		};
+		if (typeof requestIdleCallback !== "undefined") {
+			const handle = requestIdleCallback(load);
+			return () => cancelIdleCallback(handle);
+		}
+		const timer = setTimeout(load, 3000);
+		return () => clearTimeout(timer);
 	}, [config.crispId]);
 
 	return (
@@ -86,16 +110,7 @@ export function Providers({ children, config }: ProvidersProps) {
 				storageKey="theme"
 			>
 				<QueryClientProvider client={queryClient}>
-					{config.posthogKey ? (
-						<PostHogProvider
-							apiKey={config.posthogKey}
-							options={posthogOptions}
-						>
-							{children}
-						</PostHogProvider>
-					) : (
-						children
-					)}
+					<PostHogProvider client={posthog}>{children}</PostHogProvider>
 					{process.env.NODE_ENV === "development" && (
 						<ReactQueryDevtools buttonPosition="bottom-right" />
 					)}
