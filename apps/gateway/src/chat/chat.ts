@@ -30,6 +30,7 @@ import {
 	peekProviderRateLimit,
 	providerRateLimitWindows,
 } from "@/lib/provider-rate-limit.js";
+import { getResponsesContext } from "@/lib/responses-context.js";
 import {
 	createCombinedSignal,
 	createStreamingCombinedSignal,
@@ -57,6 +58,7 @@ import {
 	type InferSelectModel,
 	isCachingEnabled,
 	metricsKey,
+	type LogInsertData,
 	shortid,
 	type tables,
 	type ProviderMetrics,
@@ -764,6 +766,32 @@ chat.openapi(completions, async (c) => {
 
 	// Extract custom X-LLMGateway-* headers
 	const customHeaders = extractCustomHeaders(c);
+
+	// Read Responses API context from in-memory Map (set by /v1/responses proxy).
+	// Uses a lookup key passed via header; actual data is never in headers.
+	// External callers cannot exploit this: the key is a resp_ + shortid(24) that
+	// only exists in the Map for the duration of a single app.request() call, and
+	// getResponsesContext() deletes on read (one-time use).
+	const responsesContextKey = c.req.header("x-responses-context-key");
+	const responsesContext = responsesContextKey
+		? getResponsesContext(responsesContextKey)
+		: undefined;
+	const syncLogInsert = responsesContext?.syncInsert ?? false;
+	const logIdOverride = responsesContext?.logId;
+	const responsesApiData: unknown = responsesContext?.responsesApiData ?? null;
+
+	// Wrapper that injects Responses API fields into every log entry.
+	// Only override the id for the final log entry (retried !== true) to avoid
+	// PK conflicts when the request retries across multiple providers.
+	const insertLogEntry = (logData: LogInsertData) =>
+		insertLog(
+			{
+				...logData,
+				...(logIdOverride && !logData.retried ? { id: logIdOverride } : {}),
+				responsesApiData,
+			},
+			{ syncInsert: syncLogInsert },
+		);
 
 	// Check for X-No-Fallback header to disable provider fallback on low uptime
 	const noFallback =
@@ -2644,15 +2672,21 @@ chat.openapi(completions, async (c) => {
 		.length
 		? openAIContentFilterResult.responses
 		: null;
-	const insertLog = (logData: Parameters<typeof _insertLog>[0]) =>
-		_insertLog({
-			...logData,
-			internalContentFilter: shouldTagContentFilter
-				? true
-				: logData.internalContentFilter,
-			gatewayContentFilterResponse:
-				logData.gatewayContentFilterResponse ?? gatewayContentFilterResponse,
-		});
+	const insertLog = (
+		logData: Parameters<typeof _insertLog>[0],
+		options?: Parameters<typeof _insertLog>[1],
+	) =>
+		_insertLog(
+			{
+				...logData,
+				internalContentFilter: shouldTagContentFilter
+					? true
+					: logData.internalContentFilter,
+				gatewayContentFilterResponse:
+					logData.gatewayContentFilterResponse ?? gatewayContentFilterResponse,
+			},
+			options,
+		);
 
 	if (contentFilterBlocked) {
 		const contentFilterResponseId = `chatcmpl-${Date.now()}`;
@@ -2996,7 +3030,7 @@ chat.openapi(completions, async (c) => {
 					project.organizationId,
 				);
 
-				await insertLog({
+				await insertLogEntry({
 					...baseLogEntry,
 					duration: 0, // No processing time for cached response
 					timeToFirstToken: null, // Not applicable for cached response
@@ -3155,7 +3189,7 @@ chat.openapi(completions, async (c) => {
 					(cachedReasoningContent?.length ?? 0) +
 					500; // overhead for metadata
 
-				await insertLog({
+				await insertLogEntry({
 					...baseLogEntry,
 					duration,
 					timeToFirstToken: null, // Not applicable for cached response
@@ -3651,7 +3685,7 @@ chat.openapi(completions, async (c) => {
 				const routingAttempts: RoutingAttempt[] = [];
 				const failedProviderIds = new Set<string>();
 				let res: Response | undefined;
-				const finalLogId = shortid();
+				const finalLogId = logIdOverride ?? shortid();
 				for (
 					let retryAttempt = 0;
 					retryAttempt <= MAX_RETRIES;
@@ -3887,7 +3921,7 @@ chat.openapi(completions, async (c) => {
 								undefined, // No plugin results for error case
 							);
 
-							await insertLog({
+							await insertLogEntry({
 								...baseLogEntry,
 								duration: Date.now() - perAttemptStartTime,
 								timeToFirstToken: null,
@@ -4034,7 +4068,7 @@ chat.openapi(completions, async (c) => {
 								undefined, // No plugin results for canceled request
 							);
 
-							await insertLog({
+							await insertLogEntry({
 								...baseLogEntry,
 								duration: Date.now() - perAttemptStartTime,
 								timeToFirstToken: null, // Not applicable for canceled request
@@ -4172,7 +4206,7 @@ chat.openapi(completions, async (c) => {
 								undefined, // No plugin results for error case
 							);
 
-							await insertLog({
+							await insertLogEntry({
 								...baseLogEntry,
 								duration: Date.now() - perAttemptStartTime,
 								timeToFirstToken: null, // Not applicable for error case
@@ -4341,7 +4375,7 @@ chat.openapi(completions, async (c) => {
 							undefined, // No plugin results for error case
 						);
 
-						await insertLog({
+						await insertLogEntry({
 							...baseLogEntry,
 							duration: Date.now() - perAttemptStartTime,
 							timeToFirstToken: null,
@@ -6586,7 +6620,7 @@ chat.openapi(completions, async (c) => {
 					const shouldIncludeTokensForBilling =
 						!canceled || (canceled && billCancelledRequests);
 
-					await insertLog({
+					await insertLogEntry({
 						...baseLogEntry,
 						id: routingAttempts.length > 0 ? finalLogId : undefined,
 						duration,
@@ -6764,7 +6798,7 @@ chat.openapi(completions, async (c) => {
 	let isTimeoutFetchError = false;
 	let res: Response | undefined;
 	let duration = 0;
-	const finalLogId = shortid();
+	const finalLogId = logIdOverride ?? shortid();
 	for (let retryAttempt = 0; retryAttempt <= MAX_RETRIES; retryAttempt++) {
 		const perAttemptStartTime = Date.now();
 
@@ -7019,7 +7053,7 @@ chat.openapi(completions, async (c) => {
 				undefined, // No plugin results for error case
 			);
 
-			await insertLog({
+			await insertLogEntry({
 				...baseLogEntry,
 				duration: perAttemptDuration,
 				timeToFirstToken: null, // Not applicable for error case
@@ -7178,7 +7212,7 @@ chat.openapi(completions, async (c) => {
 				undefined, // No plugin results for canceled request
 			);
 
-			await insertLog({
+			await insertLogEntry({
 				...baseLogEntry,
 				duration,
 				timeToFirstToken: null, // Not applicable for canceled request
@@ -7304,7 +7338,7 @@ chat.openapi(completions, async (c) => {
 						undefined,
 					);
 
-					await insertLog({
+					await insertLogEntry({
 						...baseLogEntry,
 						duration: Date.now() - perAttemptStartTime,
 						timeToFirstToken: null,
@@ -7436,7 +7470,7 @@ chat.openapi(completions, async (c) => {
 				undefined, // No plugin results for error case
 			);
 
-			await insertLog({
+			await insertLogEntry({
 				...baseLogEntry,
 				duration: perAttemptDuration,
 				timeToFirstToken: null, // Not applicable for error case
@@ -7778,7 +7812,7 @@ chat.openapi(completions, async (c) => {
 				undefined,
 			);
 
-			await insertLog({
+			await insertLogEntry({
 				...baseLogEntry,
 				duration: Date.now() - startTime,
 				timeToFirstToken: null,
@@ -8119,7 +8153,7 @@ chat.openapi(completions, async (c) => {
 		}
 	}
 
-	await insertLog({
+	await insertLogEntry({
 		...baseLogEntry,
 		id: routingAttempts.length > 0 ? finalLogId : undefined,
 		duration,
