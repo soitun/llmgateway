@@ -275,7 +275,7 @@ export function ChatSupportLogsClient() {
 			{/* Left panel — Conversation list */}
 			<div
 				className={cn(
-					"flex shrink-0 flex-col border-r border-border/60 bg-card",
+					"flex min-h-0 flex-col border-r border-border/60 bg-card",
 					selectedId ? "hidden md:flex md:w-80" : "w-full md:w-80",
 				)}
 			>
