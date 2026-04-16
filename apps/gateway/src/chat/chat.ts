@@ -5415,6 +5415,7 @@ chat.openapi(completions, async (c) => {
 				let totalTokens = null;
 				let reasoningTokens = null;
 				let cachedTokens = null;
+				let cacheCreationTokens: number | null = null;
 				let streamingToolCalls = null;
 				let imageByteSize = 0; // Track total image data size for token estimation
 				let outputImageCount = 0; // Track number of output images for cost calculation
@@ -5872,6 +5873,17 @@ chat.openapi(completions, async (c) => {
 														0) +
 													(reasoningTokens ?? 0),
 											),
+											...((cachedTokens !== null ||
+												(cacheCreationTokens !== null &&
+													cacheCreationTokens > 0)) && {
+												prompt_tokens_details: {
+													cached_tokens: cachedTokens ?? 0,
+													...(cacheCreationTokens !== null &&
+														cacheCreationTokens > 0 && {
+															cache_creation_tokens: cacheCreationTokens,
+														}),
+												},
+											}),
 											...(shouldIncludeCosts && {
 												cost_usd_total: streamingCosts.totalCost,
 												cost_usd_input: streamingCosts.inputCost,
@@ -6586,6 +6598,9 @@ chat.openapi(completions, async (c) => {
 								if (usage.cachedTokens !== null) {
 									cachedTokens = usage.cachedTokens;
 								}
+								if (usage.cacheCreationTokens !== null) {
+									cacheCreationTokens = usage.cacheCreationTokens;
+								}
 
 								// Estimate tokens if not provided and we have a finish reason
 								if (finishReason && (!promptTokens || !completionTokens)) {
@@ -7119,9 +7134,15 @@ chat.openapi(completions, async (c) => {
 											1,
 											Math.round(adjPrompt + adjCompletion),
 										),
-										...(cachedTokens !== null && {
+										...((cachedTokens !== null ||
+											(cacheCreationTokens !== null &&
+												cacheCreationTokens > 0)) && {
 											prompt_tokens_details: {
-												cached_tokens: cachedTokens,
+												cached_tokens: cachedTokens ?? 0,
+												...(cacheCreationTokens !== null &&
+													cacheCreationTokens > 0 && {
+														cache_creation_tokens: cacheCreationTokens,
+													}),
 											},
 										}),
 										cost_usd_total: streamingCostsEarly.totalCost,
@@ -8736,6 +8757,7 @@ chat.openapi(completions, async (c) => {
 		completionTokens,
 		reasoningTokens,
 		cachedTokens,
+		cacheCreationTokens,
 		toolResults,
 		images,
 		annotations,
@@ -8917,6 +8939,7 @@ chat.openapi(completions, async (c) => {
 		routingAttempts.length > 0 ? routingAttempts : null,
 		requestId,
 		usedRegion,
+		cacheCreationTokens,
 	);
 
 	// Extract plugin IDs for logging
