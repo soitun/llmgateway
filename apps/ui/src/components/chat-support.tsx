@@ -92,6 +92,7 @@ export function ChatSupport() {
 			new Chat({
 				transport: new TextStreamChatTransport({
 					api: `${config.apiUrl}/public/chat-support`,
+					credentials: "include",
 					body: {
 						name: effectiveName,
 						email: effectiveEmail,
