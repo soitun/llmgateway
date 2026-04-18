@@ -335,7 +335,13 @@ publicChatSupport.post("/", async (c) => {
 		},
 	});
 
-	return result.toTextStreamResponse();
+	return result.toTextStreamResponse({
+		headers: {
+			"Cache-Control": "no-cache, no-store, no-transform",
+			"X-Accel-Buffering": "no",
+			"Content-Type": "text/plain; charset=utf-8",
+		},
+	});
 });
 
 publicChatSupport.post("/escalate", async (c) => {

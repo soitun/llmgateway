@@ -81,6 +81,10 @@ export function ChatSupport() {
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const prevMessageCountRef = useRef(0);
 	const [clientId] = useState(() => getOrCreateClientId());
+	const [viewport, setViewport] = useState<{
+		height: number;
+		offsetTop: number;
+	} | null>(null);
 
 	const isLoggedIn = !!user;
 	const effectiveName = isLoggedIn ? (user.name ?? "") : userName;
@@ -93,6 +97,9 @@ export function ChatSupport() {
 				transport: new TextStreamChatTransport({
 					api: `${config.apiUrl}/public/chat-support`,
 					credentials: "include",
+					headers: {
+						"Content-Type": "application/json",
+					},
 					body: {
 						name: effectiveName,
 						email: effectiveEmail,
@@ -118,6 +125,25 @@ export function ChatSupport() {
 			inputRef.current.focus();
 		}
 	}, [isOpen, isIdentified]);
+
+	// Track visual viewport to handle mobile keyboard pushing the chat out of view
+	useEffect(() => {
+		if (!isOpen || typeof window === "undefined" || !window.visualViewport) {
+			setViewport(null);
+			return;
+		}
+		const vv = window.visualViewport;
+		const update = () => {
+			setViewport({ height: vv.height, offsetTop: vv.offsetTop });
+		};
+		update();
+		vv.addEventListener("resize", update);
+		vv.addEventListener("scroll", update);
+		return () => {
+			vv.removeEventListener("resize", update);
+			vv.removeEventListener("scroll", update);
+		};
+	}, [isOpen]);
 
 	// Show unread indicator when assistant responds while chat is closed
 	useEffect(() => {
@@ -203,6 +229,21 @@ export function ChatSupport() {
 		}
 	};
 
+	// Compute keyboard-aware sizing for mobile. When the soft keyboard is open,
+	// visualViewport.height shrinks. We pin the chat above the keyboard.
+	const isMobile =
+		typeof window !== "undefined" &&
+		window.matchMedia("(max-width: 639px)").matches;
+	const mobileStyle: React.CSSProperties | null =
+		isOpen && isMobile && viewport
+			? {
+					bottom: `calc(${
+						window.innerHeight - viewport.height - viewport.offsetTop
+					}px + 5rem + env(safe-area-inset-bottom, 0px))`,
+					height: `min(32rem, ${viewport.height - 112}px)`,
+				}
+			: null;
+
 	return (
 		<>
 			{/* Chat window */}
@@ -210,6 +251,7 @@ export function ChatSupport() {
 				style={{
 					bottom: "calc(5rem + env(safe-area-inset-bottom, 0px))",
 					right: "calc(1rem + env(safe-area-inset-right, 0px))",
+					...(mobileStyle ?? {}),
 				}}
 				className={cn(
 					"fixed z-[60] flex flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl transition-all duration-300 ease-out sm:!right-6",
@@ -359,7 +401,12 @@ export function ChatSupport() {
 								{error && (
 									<div className="flex justify-start">
 										<div className="max-w-[85%] rounded-xl bg-destructive/10 px-3 py-2 text-sm leading-relaxed text-destructive">
-											Something went wrong. Please try again.
+											<p>Something went wrong. Please try again.</p>
+											{error.message && (
+												<p className="mt-1 text-xs opacity-80 break-words">
+													{error.message}
+												</p>
+											)}
 										</div>
 									</div>
 								)}
@@ -429,7 +476,12 @@ export function ChatSupport() {
 				type="button"
 				onClick={isOpen ? () => setIsOpen(false) : handleOpen}
 				style={{
-					bottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
+					bottom:
+						isMobile && viewport
+							? `calc(${
+									window.innerHeight - viewport.height - viewport.offsetTop
+								}px + 1rem + env(safe-area-inset-bottom, 0px))`
+							: "calc(1rem + env(safe-area-inset-bottom, 0px))",
 					right: "calc(1rem + env(safe-area-inset-right, 0px))",
 					touchAction: "manipulation",
 				}}
