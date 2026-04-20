@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { DetailStatCards } from "@/components/detail-stat-cards";
 import { HistoryChart, windowOptions } from "@/components/history-chart";
@@ -21,7 +21,7 @@ function parseHistoryWindow(value: string | null): HistoryWindow {
 	if (value && validWindows.has(value as HistoryWindow)) {
 		return value as HistoryWindow;
 	}
-	return "4h";
+	return "24h";
 }
 
 export function ModelDetailClient({
@@ -37,11 +37,10 @@ export function ModelDetailClient({
 	const router = useRouter();
 	const pathname = usePathname();
 	const window = parseHistoryWindow(searchParams.get("window"));
-	const [loading, setLoading] = useState(false);
+	const [loading, setLoading] = useState(true);
 	const [info, setInfo] = useState<ModelInfo>(allTimeStats);
 	const [providers, setProviders] =
 		useState<ModelProviderStats[]>(initialProviders);
-	const initialWindowRef = useRef(window);
 
 	const loadStats = useCallback(
 		async (w: HistoryWindow) => {
@@ -60,9 +59,6 @@ export function ModelDetailClient({
 	);
 
 	useEffect(() => {
-		if (window === initialWindowRef.current) {
-			return;
-		}
 		void loadStats(window);
 	}, [loadStats, window]);
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { DetailStatCards, StatCard } from "@/components/detail-stat-cards";
 import { HistoryChart, windowOptions } from "@/components/history-chart";
@@ -34,7 +34,7 @@ function parseHistoryWindow(value: string | null): HistoryWindow {
 	if (value && validWindows.has(value as HistoryWindow)) {
 		return value as HistoryWindow;
 	}
-	return "4h";
+	return "24h";
 }
 
 export function MappingDetailClient({
@@ -52,7 +52,6 @@ export function MappingDetailClient({
 	const window = parseHistoryWindow(searchParams.get("window"));
 	const [loading, setLoading] = useState(false);
 	const [mapping, setMapping] = useState<MappingDetail>(initialMapping);
-	const initialWindowRef = useRef(window);
 
 	const loadDetail = useCallback(
 		async (w: HistoryWindow) => {
@@ -70,9 +69,6 @@ export function MappingDetailClient({
 	);
 
 	useEffect(() => {
-		if (window === initialWindowRef.current) {
-			return;
-		}
 		void loadDetail(window);
 	}, [loadDetail, window]);
 
