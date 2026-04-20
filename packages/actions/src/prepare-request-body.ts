@@ -1715,40 +1715,74 @@ export async function prepareRequestBody(
 
 			// Enable thinking for Bedrock Anthropic models when reasoning is supported
 			if (supportsReasoning && (reasoning_effort || reasoning_max_tokens)) {
-				const getThinkingBudget = (effort?: string) => {
-					if (reasoning_max_tokens !== undefined) {
-						return Math.max(Math.min(reasoning_max_tokens, 128000), 1024);
+				if (bedrockProviderMapping?.reasoningMode === "adaptive") {
+					// Opus 4.7+ uses adaptive thinking: `thinking: { type: "adaptive" }` with
+					// `output_config.effort` controlling depth. `budget_tokens` is rejected.
+					requestBody.additionalModelRequestFields ??= {};
+					requestBody.additionalModelRequestFields.thinking = {
+						type: "adaptive",
+					};
+					const mapEffort = (
+						e: typeof reasoning_effort,
+					): "low" | "medium" | "high" | "xhigh" | "max" => {
+						switch (e) {
+							case "minimal":
+							case "low":
+								return "low";
+							case "medium":
+								return "medium";
+							case "high":
+								return "high";
+							case "xhigh":
+								return "xhigh";
+							default:
+								return "high";
+						}
+					};
+					const adaptiveEffort =
+						effort ??
+						(reasoning_effort ? mapEffort(reasoning_effort) : undefined);
+					if (adaptiveEffort !== undefined) {
+						requestBody.additionalModelRequestFields.output_config = {
+							effort: adaptiveEffort,
+						};
 					}
-					if (!effort) {
-						return 2000;
-					}
-					switch (effort) {
-						case "low":
-							return 1024;
-						case "high":
-							return 4000;
-						case "xhigh":
-							return 16000;
-						default:
+				} else {
+					const getThinkingBudget = (effort?: string) => {
+						if (reasoning_max_tokens !== undefined) {
+							return Math.max(Math.min(reasoning_max_tokens, 128000), 1024);
+						}
+						if (!effort) {
 							return 2000;
+						}
+						switch (effort) {
+							case "low":
+								return 1024;
+							case "high":
+								return 4000;
+							case "xhigh":
+								return 16000;
+							default:
+								return 2000;
+						}
+					};
+					const thinkingBudget = getThinkingBudget(reasoning_effort);
+					requestBody.additionalModelRequestFields ??= {};
+					requestBody.additionalModelRequestFields.thinking = {
+						type: "enabled",
+						budget_tokens: thinkingBudget,
+					};
+					// Ensure max_tokens is sufficient for thinking + response
+					const minMaxTokens = Math.max(1024, thinkingBudget + 1000);
+					if (
+						!inferenceConfig.maxTokens ||
+						inferenceConfig.maxTokens < minMaxTokens
+					) {
+						inferenceConfig.maxTokens = max_tokens ?? minMaxTokens;
 					}
-				};
-				const thinkingBudget = getThinkingBudget(reasoning_effort);
-				requestBody.additionalModelRequestFields ??= {};
-				requestBody.additionalModelRequestFields.thinking = {
-					type: "enabled",
-					budget_tokens: thinkingBudget,
-				};
+				}
 				// Anthropic requires temperature to be exactly 1 when thinking is enabled
 				inferenceConfig.temperature = 1;
-				// Ensure max_tokens is sufficient for thinking + response
-				const minMaxTokens = Math.max(1024, thinkingBudget + 1000);
-				if (
-					!inferenceConfig.maxTokens ||
-					inferenceConfig.maxTokens < minMaxTokens
-				) {
-					inferenceConfig.maxTokens = max_tokens ?? minMaxTokens;
-				}
 				if (Object.keys(inferenceConfig).length > 0) {
 					requestBody.inferenceConfig = inferenceConfig;
 				}
@@ -1764,12 +1798,13 @@ export async function prepareRequestBody(
 					...response_format.json_schema.schema,
 					additionalProperties: false,
 				} as Record<string, unknown>;
-				requestBody.additionalModelRequestFields = {
-					anthropic_beta: ["structured-outputs-2025-11-13"],
-					output_format: {
-						type: "json_schema",
-						schema,
-					},
+				requestBody.additionalModelRequestFields ??= {};
+				requestBody.additionalModelRequestFields.anthropic_beta = [
+					"structured-outputs-2025-11-13",
+				];
+				requestBody.additionalModelRequestFields.output_format = {
+					type: "json_schema",
+					schema,
 				};
 				requestBody.additionalModelResponseFieldPaths = ["/output_format"];
 			}
