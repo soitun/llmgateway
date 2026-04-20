@@ -157,6 +157,7 @@ import {
 	messageContentToString,
 } from "./tools/tokenizer.js";
 import {
+	applyExtendedUsageFields,
 	stripRequestScopedMetadataFromOpenAiResponse,
 	transformResponseToOpenai,
 	withCurrentRequestMetadataOnOpenAiResponse,
@@ -175,6 +176,27 @@ import type { ServerTypes } from "@/vars.js";
  * - Non-default regions only pass if a region-specific env key exists
  *   (e.g. LLM_ALIBABA_API_KEY__US_VIRGINIA).
  */
+function toDataStorageCostNumber(
+	promptTokens: number | string | null | undefined,
+	cachedTokens: number | string | null | undefined,
+	completionTokens: number | string | null | undefined,
+	reasoningTokens: number | string | null | undefined,
+	retentionLevel: "retain" | "none" | null,
+): number | null {
+	if (retentionLevel === "none") {
+		return null;
+	}
+	const str = calculateDataStorageCost(
+		promptTokens,
+		cachedTokens,
+		completionTokens,
+		reasoningTokens,
+		retentionLevel,
+	);
+	const num = Number(str);
+	return Number.isFinite(num) ? num : null;
+}
+
 function filterRegionsByAvailableKeys(
 	expandedProviders: ProviderModelMapping[],
 ): ProviderModelMapping[] {
@@ -835,14 +857,37 @@ const completions = createRoute({
 							prompt_tokens_details: z
 								.object({
 									cached_tokens: z.number(),
+									cache_write_tokens: z.number().optional(),
+									cache_creation_tokens: z.number().optional(),
+									audio_tokens: z.number().optional(),
+									video_tokens: z.number().optional(),
 								})
 								.optional(),
-							cost_usd_total: z.number().nullable().optional(),
-							cost_usd_input: z.number().nullable().optional(),
-							cost_usd_output: z.number().nullable().optional(),
-							cost_usd_cached_input: z.number().nullable().optional(),
+							completion_tokens_details: z
+								.object({
+									reasoning_tokens: z.number().optional(),
+									image_tokens: z.number().optional(),
+									audio_tokens: z.number().optional(),
+								})
+								.optional(),
+							cost: z.number().nullable().optional(),
+							cost_details: z
+								.object({
+									upstream_inference_cost: z.number(),
+									upstream_inference_prompt_cost: z.number(),
+									upstream_inference_completions_cost: z.number(),
+									total_cost: z.number().nullable().optional(),
+									input_cost: z.number().nullable().optional(),
+									output_cost: z.number().nullable().optional(),
+									cached_input_cost: z.number().nullable().optional(),
+									request_cost: z.number().nullable().optional(),
+									web_search_cost: z.number().nullable().optional(),
+									image_input_cost: z.number().nullable().optional(),
+									image_output_cost: z.number().nullable().optional(),
+									data_storage_cost: z.number().nullable().optional(),
+								})
+								.optional(),
 							info: z.string().optional(),
-							cost_usd_request: z.number().nullable().optional(),
 						}),
 						metadata: z.object({
 							request_id: z.string(),
@@ -4105,6 +4150,13 @@ chat.openapi(completions, async (c) => {
 						0,
 						project.organizationId,
 					);
+					streamingCosts.dataStorageCost = toDataStorageCostNumber(
+						streamingCosts.promptTokens ?? promptTokenCount,
+						null,
+						0,
+						null,
+						retentionLevel,
+					);
 
 					await writeSSEAndCache({
 						data: JSON.stringify({
@@ -4124,6 +4176,27 @@ chat.openapi(completions, async (c) => {
 						id: String(eventId++),
 					});
 
+					const contentFilterUsage: Record<string, any> = {
+						prompt_tokens: promptTokenCount,
+						completion_tokens: 0,
+						total_tokens: promptTokenCount,
+					};
+					applyExtendedUsageFields(contentFilterUsage, {
+						costs: {
+							inputCost: streamingCosts.inputCost,
+							outputCost: streamingCosts.outputCost,
+							cachedInputCost: streamingCosts.cachedInputCost,
+							requestCost: streamingCosts.requestCost,
+							webSearchCost: streamingCosts.webSearchCost,
+							imageInputCost: streamingCosts.imageInputCost,
+							imageOutputCost: streamingCosts.imageOutputCost,
+							totalCost: streamingCosts.totalCost,
+							dataStorageCost: streamingCosts.dataStorageCost,
+						},
+						cachedTokens: null,
+						cacheCreationTokens: null,
+						reasoningTokens: null,
+					});
 					await writeSSEAndCache({
 						data: JSON.stringify({
 							id: `chatcmpl-${Date.now()}`,
@@ -4137,18 +4210,7 @@ chat.openapi(completions, async (c) => {
 									finish_reason: null,
 								},
 							],
-							usage: {
-								prompt_tokens: promptTokenCount,
-								completion_tokens: 0,
-								total_tokens: promptTokenCount,
-								cost_usd_total: streamingCosts.totalCost,
-								cost_usd_input: streamingCosts.inputCost,
-								cost_usd_output: streamingCosts.outputCost,
-								cost_usd_cached_input: streamingCosts.cachedInputCost,
-								cost_usd_request: streamingCosts.requestCost,
-								cost_usd_image_input: streamingCosts.imageInputCost,
-								cost_usd_image_output: streamingCosts.imageOutputCost,
-							},
+							usage: contentFilterUsage,
 						}),
 						id: String(eventId++),
 					});
@@ -5841,10 +5903,68 @@ chat.openapi(completions, async (c) => {
 										webSearchCount,
 										project.organizationId,
 									);
+									streamingCosts.dataStorageCost = toDataStorageCostNumber(
+										streamingCosts.promptTokens ?? finalPromptTokens,
+										cachedTokens,
+										streamingCosts.completionTokens ?? finalCompletionTokens,
+										reasoningTokens,
+										retentionLevel,
+									);
 
 									// Include costs in response for all users
 									const shouldIncludeCosts = true;
 
+									const finalStreamUsage: Record<string, any> = {
+										prompt_tokens: Math.max(
+											1,
+											streamingCosts.promptTokens ?? finalPromptTokens ?? 1,
+										),
+										completion_tokens:
+											streamingCosts.completionTokens ??
+											finalCompletionTokens ??
+											0,
+										total_tokens: Math.max(
+											1,
+											(streamingCosts.promptTokens ?? finalPromptTokens ?? 0) +
+												(streamingCosts.completionTokens ??
+													finalCompletionTokens ??
+													0) +
+												(reasoningTokens ?? 0),
+										),
+										...(reasoningTokens !== null &&
+											reasoningTokens > 0 && {
+												reasoning_tokens: reasoningTokens,
+											}),
+										...((cachedTokens !== null ||
+											(cacheCreationTokens !== null &&
+												cacheCreationTokens > 0)) && {
+											prompt_tokens_details: {
+												cached_tokens: cachedTokens ?? 0,
+												...(cacheCreationTokens !== null &&
+													cacheCreationTokens > 0 && {
+														cache_creation_tokens: cacheCreationTokens,
+													}),
+											},
+										}),
+									};
+									applyExtendedUsageFields(finalStreamUsage, {
+										costs: shouldIncludeCosts
+											? {
+													inputCost: streamingCosts.inputCost,
+													outputCost: streamingCosts.outputCost,
+													cachedInputCost: streamingCosts.cachedInputCost,
+													requestCost: streamingCosts.requestCost,
+													webSearchCost: streamingCosts.webSearchCost,
+													imageInputCost: streamingCosts.imageInputCost,
+													imageOutputCost: streamingCosts.imageOutputCost,
+													totalCost: streamingCosts.totalCost,
+													dataStorageCost: streamingCosts.dataStorageCost,
+												}
+											: null,
+										cachedTokens,
+										cacheCreationTokens,
+										reasoningTokens,
+									});
 									const finalUsageChunk = {
 										id: `chatcmpl-${Date.now()}`,
 										object: "chat.completion.chunk",
@@ -5857,46 +5977,7 @@ chat.openapi(completions, async (c) => {
 												finish_reason: null,
 											},
 										],
-										usage: {
-											prompt_tokens: Math.max(
-												1,
-												streamingCosts.promptTokens ?? finalPromptTokens ?? 1,
-											),
-											completion_tokens:
-												streamingCosts.completionTokens ??
-												finalCompletionTokens ??
-												0,
-											total_tokens: Math.max(
-												1,
-												(streamingCosts.promptTokens ??
-													finalPromptTokens ??
-													0) +
-													(streamingCosts.completionTokens ??
-														finalCompletionTokens ??
-														0) +
-													(reasoningTokens ?? 0),
-											),
-											...((cachedTokens !== null ||
-												(cacheCreationTokens !== null &&
-													cacheCreationTokens > 0)) && {
-												prompt_tokens_details: {
-													cached_tokens: cachedTokens ?? 0,
-													...(cacheCreationTokens !== null &&
-														cacheCreationTokens > 0 && {
-															cache_creation_tokens: cacheCreationTokens,
-														}),
-												},
-											}),
-											...(shouldIncludeCosts && {
-												cost_usd_total: streamingCosts.totalCost,
-												cost_usd_input: streamingCosts.inputCost,
-												cost_usd_output: streamingCosts.outputCost,
-												cost_usd_cached_input: streamingCosts.cachedInputCost,
-												cost_usd_request: streamingCosts.requestCost,
-												cost_usd_image_input: streamingCosts.imageInputCost,
-												cost_usd_image_output: streamingCosts.imageOutputCost,
-											}),
-										},
+										usage: finalStreamUsage,
 									};
 
 									await writeSSEAndCache({
@@ -7079,6 +7160,7 @@ chat.openapi(completions, async (c) => {
 										estimatedCost: false,
 										discount: undefined,
 										pricingTier: undefined,
+										dataStorageCost: null as number | null,
 									}
 								: await calculateCosts(
 										usedModel,
@@ -7100,6 +7182,16 @@ chat.openapi(completions, async (c) => {
 										webSearchCount,
 										project.organizationId,
 									);
+						if (streamingCostsEarly.totalCost !== null) {
+							streamingCostsEarly.dataStorageCost = toDataStorageCostNumber(
+								streamingCostsEarly.promptTokens ?? calculatedPromptTokens,
+								cachedTokens,
+								streamingCostsEarly.completionTokens ??
+									calculatedCompletionTokens,
+								reasoningTokens,
+								retentionLevel,
+							);
+						}
 
 						// Always send final usage chunk with cost data for SDK compatibility
 						try {
@@ -7134,13 +7226,17 @@ chat.openapi(completions, async (c) => {
 									const adjCompletion = Math.round(
 										completionTokens ?? calculatedCompletionTokens ?? 0,
 									);
-									return {
+									const earlyUsage: Record<string, any> = {
 										prompt_tokens: adjPrompt,
 										completion_tokens: adjCompletion,
 										total_tokens: Math.max(
 											1,
 											Math.round(adjPrompt + adjCompletion),
 										),
+										...(reasoningTokens !== null &&
+											reasoningTokens > 0 && {
+												reasoning_tokens: reasoningTokens,
+											}),
 										...((cachedTokens !== null ||
 											(cacheCreationTokens !== null &&
 												cacheCreationTokens > 0)) && {
@@ -7152,14 +7248,24 @@ chat.openapi(completions, async (c) => {
 													}),
 											},
 										}),
-										cost_usd_total: streamingCostsEarly.totalCost,
-										cost_usd_input: streamingCostsEarly.inputCost,
-										cost_usd_output: streamingCostsEarly.outputCost,
-										cost_usd_cached_input: streamingCostsEarly.cachedInputCost,
-										cost_usd_request: streamingCostsEarly.requestCost,
-										cost_usd_image_input: streamingCostsEarly.imageInputCost,
-										cost_usd_image_output: streamingCostsEarly.imageOutputCost,
 									};
+									applyExtendedUsageFields(earlyUsage, {
+										costs: {
+											inputCost: streamingCostsEarly.inputCost,
+											outputCost: streamingCostsEarly.outputCost,
+											cachedInputCost: streamingCostsEarly.cachedInputCost,
+											requestCost: streamingCostsEarly.requestCost,
+											webSearchCost: streamingCostsEarly.webSearchCost,
+											imageInputCost: streamingCostsEarly.imageInputCost,
+											imageOutputCost: streamingCostsEarly.imageOutputCost,
+											totalCost: streamingCostsEarly.totalCost,
+											dataStorageCost: streamingCostsEarly.dataStorageCost,
+										},
+										cachedTokens,
+										cacheCreationTokens,
+										reasoningTokens,
+									});
+									return earlyUsage;
 								})(),
 							};
 
@@ -7343,6 +7449,7 @@ chat.openapi(completions, async (c) => {
 									estimatedCost: false,
 									discount: undefined,
 									pricingTier: undefined,
+									dataStorageCost: null as number | null,
 								}
 							: await calculateCosts(
 									usedModel,
@@ -8895,6 +9002,13 @@ chat.openapi(completions, async (c) => {
 		webSearchCount,
 		project.organizationId,
 	);
+	costs.dataStorageCost = toDataStorageCostNumber(
+		costs.promptTokens ?? calculatedPromptTokens,
+		cachedTokens,
+		costs.completionTokens ?? calculatedCompletionTokens,
+		calculatedReasoningTokens,
+		retentionLevel,
+	);
 
 	// Use costs.promptTokens as canonical value (includes image input
 	// tokens for providers that exclude them from upstream usage)
@@ -8943,6 +9057,7 @@ chat.openapi(completions, async (c) => {
 					imageInputCost: costs.imageInputCost,
 					imageOutputCost: costs.imageOutputCost,
 					totalCost: costs.totalCost,
+					dataStorageCost: costs.dataStorageCost,
 				}
 			: null,
 		false, // showUpgradeMessage - never show since Pro plan is removed
