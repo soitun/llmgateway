@@ -753,16 +753,16 @@ export default function ChatPageClient({
 		// submitted prompt into each extra window as a separate user message.
 		if (syncInput) {
 			const submitFns = Object.values(extraSubmitRefs.current);
-			for (const submit of submitFns) {
-				try {
-					await submit(content);
-				} catch (mirrorError) {
-					// Don't surface comparison errors as hard failures
-
-					console.warn(
-						"Failed to mirror prompt to comparison window",
-						mirrorError,
-					);
+			const results = await Promise.allSettled(
+				submitFns.map((submit) => submit(content)),
+			);
+			for (const result of results) {
+				if (result.status === "rejected") {
+					// Don't surface comparison errors as hard failures;
+					// capture as telemetry instead of logging to console.
+					posthog.capture("playground_mirror_prompt_failure", {
+						reason: String(result.reason),
+					});
 				}
 			}
 		}
