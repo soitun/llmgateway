@@ -105,6 +105,7 @@ import {
 	getContentFilterMode,
 	shouldApplyContentFilterToModel,
 } from "./tools/check-content-filter.js";
+import { collapseImageGenSse } from "./tools/collapse-image-gen-sse.js";
 import { convertImagesToBase64 } from "./tools/convert-images-to-base64.js";
 import { countInputImages } from "./tools/count-input-images.js";
 import { createLogEntry } from "./tools/create-log-entry.js";
@@ -176,6 +177,35 @@ import type { ServerTypes } from "@/vars.js";
  * - Non-default regions only pass if a region-specific env key exists
  *   (e.g. LLM_ALIBABA_API_KEY__US_VIRGINIA).
  */
+/**
+ * Inject stream=true and partial_images=1 into an OpenAI/Azure gpt-image-*
+ * request body so the upstream call uses SSE. The single partial keeps the
+ * connection alive past Azure's 122s synchronous wall; the gateway discards
+ * the partial event and returns only the final image to the client.
+ *
+ * Multipart caveat: Azure's /v1/images/edits parses the stream form field with
+ * a case-sensitive boolean parser (.NET-style) — "true" (lowercase) is treated
+ * as falsy and Azure runs the request synchronously, hitting the 122s wall.
+ * "True" (Pascal case, matching httpx's str(True) encoding used by the Python
+ * SDK) is parsed correctly. OpenAI accepts both cases, so "True" is safe for
+ * both providers. JSON bodies are unaffected — native booleans go on the wire
+ * as `true` and parse correctly everywhere.
+ */
+function injectImageStreamParams(
+	body: ProviderRequestBody | FormData,
+): ProviderRequestBody | FormData {
+	if (body instanceof FormData) {
+		body.set("stream", "True");
+		body.set("partial_images", "1");
+		return body;
+	}
+	return {
+		...(body as unknown as Record<string, unknown>),
+		stream: true,
+		partial_images: 1,
+	} as unknown as ProviderRequestBody;
+}
+
 function toDataStorageCostNumber(
 	promptTokens: number | string | null | undefined,
 	cachedTokens: number | string | null | undefined,
@@ -3689,6 +3719,15 @@ chat.openapi(completions, async (c) => {
 	// When the provider only supports streaming, force it even if the client didn't request it.
 	// The upstream request uses effectiveStream; the client response uses stream.
 	const forceStream = streamingSupport === "only" && !stream;
+	// Force upstream SSE for OpenAI/Azure gpt-image-* even when the client requested
+	// non-streaming. partial_images=1 keeps the connection alive past Azure's 122s
+	// synchronous wall and lets us use AI_STREAMING_TIMEOUT_MS (240s default) instead
+	// of AI_TIMEOUT_MS (180s). The SSE response is collapsed back into the regular
+	// non-streaming JSON shape before the client sees it.
+	let forceImageStreamUpstream =
+		!stream &&
+		isImageGeneration &&
+		(usedProvider === "openai" || usedProvider === "azure");
 	const effectiveStream = fakeStreamingForImageGen
 		? false
 		: stream || forceStream;
@@ -3838,6 +3877,10 @@ chat.openapi(completions, async (c) => {
 		useResponsesApi,
 	);
 
+	if (forceImageStreamUpstream) {
+		requestBody = injectImageStreamParams(requestBody);
+	}
+
 	// Validate effective max_tokens value after prepareRequestBody
 	if (
 		!(requestBody instanceof FormData) &&
@@ -3885,6 +3928,20 @@ chat.openapi(completions, async (c) => {
 		requestBody instanceof FormData
 	) {
 		url = url.replace("/v1/images/generations", "/v1/images/edits");
+	}
+
+	// Switch Azure image generation endpoint to /edits when input images are present.
+	// Handles both ai-foundry (/openai/v1/images/generations?api-version=preview) and
+	// deployment-based (/openai/deployments/{model}/images/generations?api-version=...)
+	// URL shapes — the literal "/images/generations" substring appears before the
+	// query string in both, so the in-place replace works for both.
+	if (
+		isImageGeneration &&
+		usedProvider === "azure" &&
+		url &&
+		requestBody instanceof FormData
+	) {
+		url = url.replace("/images/generations", "/images/edits");
 	}
 
 	const startTime = Date.now();
@@ -3978,6 +4035,13 @@ chat.openapi(completions, async (c) => {
 		useResponsesApi = ctx.useResponsesApi;
 		requestCanBeCanceled = ctx.requestCanBeCanceled;
 		isImageGeneration = ctx.isImageGeneration;
+		forceImageStreamUpstream =
+			!stream &&
+			isImageGeneration &&
+			(usedProvider === "openai" || usedProvider === "azure");
+		if (forceImageStreamUpstream) {
+			requestBody = injectImageStreamParams(requestBody);
+		}
 		supportsReasoning = ctx.supportsReasoning;
 		splitTaggedReasoning = ctx.splitTaggedReasoning ?? false;
 		temperature = ctx.temperature;
@@ -7801,10 +7865,14 @@ chat.openapi(completions, async (c) => {
 			}
 
 			// Create a combined signal for both timeout and cancellation
-			// Non-streaming requests use a shorter timeout (default 80s)
-			const fetchSignal = createCombinedSignal(
-				requestCanBeCanceled ? controller : undefined,
-			);
+			// Non-streaming requests use a shorter timeout (default 80s).
+			// When we're forcing upstream SSE for openai/azure gpt-image-* (to
+			// dodge Azure's 122s sync wall), use the longer streaming timeout.
+			const fetchSignal = forceImageStreamUpstream
+				? createStreamingCombinedSignal(
+						requestCanBeCanceled ? controller : undefined,
+					)
+				: createCombinedSignal(requestCanBeCanceled ? controller : undefined);
 
 			res = await fetch(url, {
 				method: "POST",
@@ -8710,6 +8778,36 @@ chat.openapi(completions, async (c) => {
 				],
 				...(usage ? { usage } : {}),
 			};
+		} else if (forceImageStreamUpstream && res.body) {
+			// Upstream is openai/azure gpt-image-* and we forced stream=true
+			// to dodge the 122s sync wall. Collapse the SSE back into the
+			// normal { data: [{ b64_json }], usage } shape.
+			const text = await res.text();
+			const collapsed = collapseImageGenSse(text);
+			if ("error" in collapsed) {
+				logger.warn("Image generation SSE collapse failed", {
+					usedProvider,
+					usedModel,
+					code: collapsed.error.code,
+					message: collapsed.error.message,
+				});
+				return c.json(
+					{
+						error: {
+							message: collapsed.error.message,
+							type: collapsed.error.type ?? "upstream_error",
+							param: null,
+							code: collapsed.error.code ?? "upstream_error",
+							requestedProvider,
+							usedProvider,
+							requestedModel: initialRequestedModel,
+							usedModel,
+						},
+					},
+					502,
+				);
+			}
+			json = collapsed.json;
 		} else {
 			json = await res.json();
 		}
