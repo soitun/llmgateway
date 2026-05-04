@@ -6504,6 +6504,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         amount: number;
+                        stripePaymentMethodId?: string;
                     };
                 };
             };
@@ -6516,6 +6517,8 @@ export interface paths {
                     content: {
                         "application/json": {
                             clientSecret: string;
+                            totalAmount: number;
+                            isInternational: boolean;
                         };
                     };
                 };
@@ -6815,7 +6818,9 @@ export interface paths {
                         "application/json": {
                             baseAmount: number;
                             platformFee: number;
+                            internationalFee: number;
                             totalAmount: number;
+                            isInternational: boolean;
                             bonusAmount?: number;
                             finalCreditAmount?: number;
                             bonusEnabled: boolean;
