@@ -573,7 +573,14 @@ export async function createProviderKey(
 			baseUrl,
 			options,
 		})
-		.onConflictDoNothing();
+		.onConflictDoUpdate({
+			target: tables.providerKey.id,
+			set: {
+				token,
+				baseUrl,
+				options,
+			},
+		});
 }
 
 export function validateResponse(json: any) {
@@ -674,27 +681,45 @@ export async function beforeAllHook() {
 		const baseUrlValue = baseUrlEnvName
 			? process.env[baseUrlEnvName]
 			: undefined;
-		const options: ProviderKeyOptions | undefined =
-			provider.id === "azure" && process.env.LLM_AZURE_RESOURCE
-				? { azure_resource: process.env.LLM_AZURE_RESOURCE }
-				: undefined;
+		const providerOptions = providerEnvOptionsForTests(provider.id);
 		if (envVarValue) {
 			await createProviderKey(
 				provider.id,
 				envVarValue,
 				"api-keys",
 				baseUrlValue,
-				options,
+				providerOptions,
 			);
 			await createProviderKey(
 				provider.id,
 				envVarValue,
 				"credits",
 				baseUrlValue,
-				options,
+				providerOptions,
 			);
 		}
 	}
+}
+
+function providerEnvOptionsForTests(
+	providerId: string,
+): ProviderKeyOptions | undefined {
+	if (providerId === "azure" && process.env.LLM_AZURE_RESOURCE) {
+		return { azure_resource: process.env.LLM_AZURE_RESOURCE };
+	}
+	if (providerId === "azure-ai-foundry") {
+		const resource = process.env.LLM_AZURE_AI_FOUNDRY_RESOURCE;
+		const apiVersion = process.env.LLM_AZURE_AI_FOUNDRY_API_VERSION;
+		const opts: ProviderKeyOptions = {};
+		if (resource) {
+			opts.azure_ai_foundry_resource = resource;
+		}
+		if (apiVersion) {
+			opts.azure_ai_foundry_api_version = apiVersion;
+		}
+		return Object.keys(opts).length > 0 ? opts : undefined;
+	}
+	return undefined;
 }
 
 export async function beforeEachHook() {
