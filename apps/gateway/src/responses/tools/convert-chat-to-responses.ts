@@ -136,8 +136,17 @@ export function convertChatResponseToResponses(
 		}
 	}
 
-	// Add message output
-	if (message?.content !== null && message?.content !== undefined) {
+	// Add message output. Skip if content is empty/whitespace-only — many
+	// providers return content: "" alongside tool_calls, and emitting an empty
+	// message item pollutes stored conversations: on replay via
+	// previous_response_id it becomes a stray assistant message that separates
+	// the tool_calls assistant from its tool result, causing strict providers
+	// (deepseek, bytedance, aws-bedrock, kimi, etc.) to reject the request.
+	if (
+		message?.content !== null &&
+		message?.content !== undefined &&
+		message.content.trim() !== ""
+	) {
 		const contentParts: Array<Record<string, unknown>> = [
 			{
 				type: "output_text",
