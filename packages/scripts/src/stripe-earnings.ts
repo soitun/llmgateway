@@ -335,6 +335,51 @@ async function main(): Promise<void> {
 			);
 		}
 		console.log("");
+
+		const codeItems = items.filter((b) => b.productName.startsWith("Code"));
+		if (codeItems.length > 0) {
+			const codeTotals = codeItems.reduce(
+				(acc, b) => {
+					acc.gross += b.grossCents;
+					acc.refunded += b.refundedCents;
+					acc.net += b.netCents;
+					acc.charges += b.entries;
+					return acc;
+				},
+				{ gross: 0, refunded: 0, net: 0, charges: 0 },
+			);
+
+			console.log(`--- Code* totals (${currency.toUpperCase()}) ---`);
+			console.log(
+				"Product".padEnd(40) +
+					"Product ID".padEnd(28) +
+					"Gross".padStart(12) +
+					"Refunded".padStart(12) +
+					"Net".padStart(12) +
+					"Charges".padStart(10),
+			);
+			console.log("-".repeat(112));
+			for (const bucket of codeItems) {
+				console.log(
+					bucket.productName.slice(0, 38).padEnd(40) +
+						bucket.productId.slice(0, 26).padEnd(28) +
+						fmt(bucket.grossCents).padStart(12) +
+						fmt(bucket.refundedCents).padStart(12) +
+						fmt(bucket.netCents).padStart(12) +
+						String(bucket.entries).padStart(10),
+				);
+			}
+			console.log("-".repeat(112));
+			console.log(
+				"TOTAL".padEnd(40) +
+					"".padEnd(28) +
+					fmt(codeTotals.gross).padStart(12) +
+					fmt(codeTotals.refunded).padStart(12) +
+					fmt(codeTotals.net).padStart(12) +
+					String(codeTotals.charges).padStart(10),
+			);
+			console.log("");
+		}
 	}
 }
 
