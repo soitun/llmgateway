@@ -4734,16 +4734,6 @@ const blockOrganizationRoute = createRoute({
 			description:
 				"Organization blocked, subscriptions cancelled, access disabled.",
 		},
-		403: {
-			content: {
-				"application/json": {
-					schema: z.object({
-						message: z.string(),
-					}),
-				},
-			},
-			description: "Personal organizations cannot be blocked.",
-		},
 		404: {
 			content: {
 				"application/json": {
@@ -4767,12 +4757,6 @@ admin.openapi(blockOrganizationRoute, async (c) => {
 
 	if (!org) {
 		throw new HTTPException(404, { message: "Organization not found" });
-	}
-
-	if (org.isPersonal) {
-		throw new HTTPException(403, {
-			message: "Cannot block personal organization",
-		});
 	}
 
 	const subscriptionIds = [
