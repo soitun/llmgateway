@@ -126,7 +126,6 @@ export const providers = [
 		color: "#4285f4",
 		website: "https://ai.google.com",
 		announcement: null,
-		priority: 0.8,
 		termsUrl: "https://ai.google.dev/gemini-api/terms",
 		privacyPolicyUrl: "https://cloud.google.com/terms/data-processing-addendum",
 	},
