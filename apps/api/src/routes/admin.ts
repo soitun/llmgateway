@@ -5539,6 +5539,7 @@ const providerModelStatsSchema = z.object({
 	upstreamErrorsCount: z.number(),
 	cachedCount: z.number(),
 	avgTimeToFirstToken: z.number().nullable(),
+	totalCost: z.number(),
 	updatedAt: z.string(),
 });
 
@@ -5640,6 +5641,10 @@ admin.openapi(getProviderDetail, async (c) => {
 					sql<number>`COALESCE(SUM(${modelProviderMappingHistory.totalTimeToFirstToken}), 0)`.as(
 						"total_ttft",
 					),
+				totalCost:
+					sql<number>`COALESCE(SUM(${modelProviderMappingHistory.totalCost}), 0)`.as(
+						"total_cost",
+					),
 			})
 			.from(modelProviderMappingHistory)
 			.where(
@@ -5673,6 +5678,7 @@ admin.openapi(getProviderDetail, async (c) => {
 			upstreamErrorsCount: Number(s?.upstreamErrorsCount ?? 0),
 			cachedCount,
 			avgTimeToFirstToken: avgTtft ?? m.avgTimeToFirstToken,
+			totalCost: Number(s?.totalCost ?? 0),
 			updatedAt: m.updatedAt.toISOString(),
 		};
 	});

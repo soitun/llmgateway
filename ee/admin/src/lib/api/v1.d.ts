@@ -4082,6 +4082,7 @@ export interface paths {
                                 upstreamErrorsCount: number;
                                 cachedCount: number;
                                 avgTimeToFirstToken: number | null;
+                                totalCost: number;
                                 updatedAt: string;
                             }[];
                         };
