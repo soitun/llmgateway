@@ -1450,6 +1450,7 @@ export const ChatUI = ({
 								}
 							}}
 							placeholder="Message"
+							disabled={isLoading}
 						/>
 					</PromptInputBody>
 					<PromptInputToolbar>

@@ -8994,6 +8994,7 @@ export interface paths {
                                 status: "active" | "archived" | "deleted";
                                 webSearch: boolean;
                                 pinned: boolean;
+                                comparisonEnabled: boolean;
                                 shareId: string | null;
                                 /** Format: date-time */
                                 sharedAt: string | null;
@@ -9027,6 +9028,9 @@ export interface paths {
                         model: string;
                         /** @default false */
                         webSearch?: boolean;
+                        /** @default false */
+                        comparisonEnabled?: boolean;
+                        parentChatId?: string;
                     };
                 };
             };
@@ -9046,6 +9050,7 @@ export interface paths {
                                 status: "active" | "archived" | "deleted";
                                 webSearch: boolean;
                                 pinned: boolean;
+                                comparisonEnabled: boolean;
                                 shareId: string | null;
                                 /** Format: date-time */
                                 sharedAt: string | null;
@@ -9116,6 +9121,7 @@ export interface paths {
                                 status: "active" | "archived" | "deleted";
                                 webSearch: boolean;
                                 pinned: boolean;
+                                comparisonEnabled: boolean;
                                 shareId: string | null;
                                 /** Format: date-time */
                                 sharedAt: string | null;
@@ -9176,6 +9182,7 @@ export interface paths {
                                 status: "active" | "archived" | "deleted";
                                 webSearch: boolean;
                                 pinned: boolean;
+                                comparisonEnabled: boolean;
                                 shareId: string | null;
                                 /** Format: date-time */
                                 sharedAt: string | null;
@@ -9205,6 +9212,7 @@ export interface paths {
                                 /** Format: date-time */
                                 createdAt: string;
                             }[];
+                            comparisonChatIds: string[];
                         };
                     };
                 };
@@ -9284,6 +9292,7 @@ export interface paths {
                                 status: "active" | "archived" | "deleted";
                                 webSearch: boolean;
                                 pinned: boolean;
+                                comparisonEnabled: boolean;
                                 shareId: string | null;
                                 /** Format: date-time */
                                 sharedAt: string | null;
