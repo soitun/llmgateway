@@ -1006,22 +1006,8 @@
     {
       "idx": 143,
       "version": "8",
-      "when": 1780002035470,
-      "tag": "1780002035_eminent_magma",
-      "breakpoints": true
-    },
-    {
-      "idx": 144,
-      "version": "8",
-      "when": 1780002234376,
-      "tag": "1780002234_deep_iron_fist",
-      "breakpoints": true
-    },
-    {
-      "idx": 145,
-      "version": "8",
-      "when": 1780142110590,
-      "tag": "1780142110_ambitious_raider",
+      "when": 1780175720128,
+      "tag": "1780175720_wise_groot",
       "breakpoints": true
     }
   ]
