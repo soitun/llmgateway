@@ -7692,6 +7692,7 @@ export interface paths {
                                     modelName: string;
                                     jobId: string | null;
                                     videoUrl: string | null;
+                                    expiresAt?: number | null;
                                     error?: string;
                                 }[];
                             }[];
@@ -7731,6 +7732,7 @@ export interface paths {
                             modelName: string;
                             jobId: string | null;
                             videoUrl: string | null;
+                            expiresAt?: number | null;
                             error?: string;
                         }[];
                     };
@@ -7767,6 +7769,7 @@ export interface paths {
                                     modelName: string;
                                     jobId: string | null;
                                     videoUrl: string | null;
+                                    expiresAt?: number | null;
                                     error?: string;
                                 }[];
                             };
@@ -7864,6 +7867,7 @@ export interface paths {
                                     modelName: string;
                                     jobId: string | null;
                                     videoUrl: string | null;
+                                    expiresAt?: number | null;
                                     error?: string;
                                 }[];
                             };
@@ -12104,6 +12108,7 @@ export interface operations {
                                 supportedParameters: string[] | null;
                                 supportedVideoSizes: string[] | null;
                                 supportedVideoDurationsSeconds: number[] | null;
+                                supportedVideoDurationsSecondsImageToVideo: number[] | null;
                                 supportsVideoAudio: boolean | null;
                                 supportsVideoWithoutAudio: boolean | null;
                                 perSecondPrice: {
