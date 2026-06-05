@@ -10487,11 +10487,6 @@ export interface paths {
                     "application/json": {
                         /** @enum {string} */
                         tier: "lite" | "pro" | "max";
-                        /**
-                         * @default monthly
-                         * @enum {string}
-                         */
-                        cycle?: "monthly" | "annual";
                     };
                 };
             };
