@@ -121,10 +121,12 @@ import {
 	type ProviderModelMapping,
 	type ProviderRequestBody,
 	providers,
+	supportsServiceTier,
 	type WebSearchTool,
 	expandAllProviderRegions,
 	getProviderDefinition,
 	getRegionSpecificEnvVarName,
+	getProviderEnvValue,
 } from "@llmgateway/models";
 import { isChatPlanModelAllowed } from "@llmgateway/shared";
 
@@ -766,6 +768,100 @@ function logVertexTrafficType(
 		trafficType,
 		downgraded: trafficType === "ON_DEMAND",
 	});
+}
+
+function readServiceTierValue(value: unknown): string | undefined {
+	if (typeof value !== "object" || value === null) {
+		return undefined;
+	}
+
+	const record = value as Record<string, unknown>;
+	if (typeof record.service_tier === "string") {
+		return record.service_tier;
+	}
+
+	if (typeof record.response === "object" && record.response !== null) {
+		return readServiceTierValue(record.response);
+	}
+
+	return undefined;
+}
+
+function resolveOpenAIServiceTier(
+	data: unknown,
+): "flex" | "priority" | null | undefined {
+	const serviceTier = readServiceTierValue(data);
+	if (serviceTier === undefined) {
+		return undefined;
+	}
+	const normalized = serviceTier.toLowerCase();
+	if (normalized === "flex" || normalized === "priority") {
+		return normalized;
+	}
+	return null;
+}
+
+function getForwardedServiceTier(
+	model: string,
+	provider: Provider,
+	region: string | undefined,
+	serviceTier: "auto" | "default" | "flex" | "priority" | undefined,
+	configIndex?: number,
+): "flex" | "priority" | undefined {
+	if (serviceTier !== "flex" && serviceTier !== "priority") {
+		return undefined;
+	}
+	const effectiveRegion =
+		provider === "google-vertex"
+			? (region ??
+				getProviderEnvValue("google-vertex", "region", configIndex, "global") ??
+				"global")
+			: region;
+	return supportsServiceTier(
+		model,
+		provider,
+		serviceTier,
+		effectiveRegion ?? null,
+	)
+		? serviceTier
+		: undefined;
+}
+
+function isRequestedServiceTier(
+	serviceTier: "auto" | "default" | "flex" | "priority" | undefined,
+): serviceTier is "flex" | "priority" {
+	return serviceTier === "flex" || serviceTier === "priority";
+}
+
+function providerMatchesRequestedProvider(
+	mapping: ProviderModelMapping,
+	requestedProvider: Provider | undefined,
+): boolean {
+	return (
+		!requestedProvider ||
+		requestedProvider === "llmgateway" ||
+		mapping.providerId === requestedProvider
+	);
+}
+
+function mappingSupportsRequestedServiceTier(
+	model: string,
+	mapping: ProviderModelMapping,
+	serviceTier: "flex" | "priority",
+	configIndex?: number,
+): boolean {
+	const effectiveRegion =
+		mapping.providerId === "google-vertex"
+			? (mapping.region ??
+				getProviderEnvValue("google-vertex", "region", configIndex, "global") ??
+				"global")
+			: mapping.region;
+	return supportsServiceTier(
+		model,
+		mapping.providerId,
+		serviceTier,
+		effectiveRegion ?? null,
+	);
 }
 
 // Pre-compiled regex pattern to avoid recompilation per request
@@ -1616,6 +1712,8 @@ chat.openapi(completions, async (c) => {
 			discount: discount ?? null,
 		});
 
+	let configIndex = 0; // Index for round-robin environment variables
+
 	// Filter region candidates based on available keys.
 	// - credits mode: only keep regions with env keys (base key → default region only)
 	// - hybrid mode: providers with a DB key keep all regions (user chose their region);
@@ -1667,6 +1765,140 @@ chat.openapi(completions, async (c) => {
 			routingExpandedModelProviders,
 		);
 		allModelProviders = filterHybridRegions(allModelProviders);
+	}
+
+	if (isRequestedServiceTier(service_tier)) {
+		const serviceTierCandidateProviders = modelInfo.providers.filter(
+			(mapping) => providerMatchesRequestedProvider(mapping, requestedProvider),
+		);
+		const serviceTierSupportedProviders = serviceTierCandidateProviders.filter(
+			(mapping) =>
+				mappingSupportsRequestedServiceTier(
+					modelInfo.id,
+					mapping,
+					service_tier,
+					configIndex,
+				),
+		);
+
+		if (serviceTierSupportedProviders.length === 0) {
+			const scopedModel =
+				requestedProvider &&
+				requestedProvider !== "llmgateway" &&
+				requestedProvider !== "custom"
+					? `${requestedProvider}/${modelInfo.id}`
+					: modelInfo.id;
+			const errorMessage = `Service tier '${service_tier}' is not available for model ${scopedModel}.`;
+
+			try {
+				await _insertLog(
+					{
+						...createLogEntry(
+							requestId,
+							project,
+							apiKey,
+							undefined,
+							"",
+							undefined,
+							"llmgateway",
+							requestedModel,
+							requestedProvider,
+							messages as any[],
+							temperature,
+							max_tokens,
+							top_p,
+							frequency_penalty,
+							presence_penalty,
+							reasoning_effort,
+							reasoning_max_tokens,
+							effort as "low" | "medium" | "high" | undefined,
+							response_format,
+							tools,
+							tool_choice,
+							source,
+							customHeaders,
+							debugMode,
+							userAgent,
+							image_config,
+						),
+						...(logIdOverride ? { id: logIdOverride } : {}),
+						responsesApiData,
+						content: null,
+						responseSize: 0,
+						finishReason: "client_error",
+						promptTokens: null,
+						completionTokens: null,
+						totalTokens: null,
+						reasoningTokens: null,
+						cachedTokens: null,
+						hasError: true,
+						streamed: !!stream,
+						canceled: false,
+						errorDetails: {
+							statusCode: 400,
+							statusText: "Bad Request",
+							responseText: JSON.stringify({
+								message: errorMessage,
+								service_tier,
+								model: scopedModel,
+							}),
+							cause: "unsupported_service_tier",
+						},
+						duration: 0,
+						timeToFirstToken: null,
+						inputCost: 0,
+						outputCost: 0,
+						cachedInputCost: 0,
+						requestCost: 0,
+						webSearchCost: 0,
+						imageInputTokens: null,
+						imageOutputTokens: null,
+						imageInputCost: null,
+						imageOutputCost: null,
+						cost: 0,
+						estimatedCost: false,
+						discount: null,
+						pricingTier: null,
+						serviceTier: null,
+						dataStorageCost: "0",
+					},
+					{ syncInsert: syncLogInsert },
+				);
+			} catch (error) {
+				logger.error("Failed to log unsupported service tier rejection", {
+					error: toError(error),
+				});
+			}
+
+			return c.json(
+				{
+					error: {
+						message: errorMessage,
+						type: "invalid_request_error",
+						param: "service_tier",
+						code: "unsupported_service_tier",
+					},
+				},
+				400,
+			);
+		}
+
+		const supportsRequestedTier = (mapping: ProviderModelMapping) =>
+			providerMatchesRequestedProvider(mapping, requestedProvider) &&
+			mappingSupportsRequestedServiceTier(
+				modelInfo.id,
+				mapping,
+				service_tier,
+				configIndex,
+			);
+		modelInfo = {
+			...modelInfo,
+			providers: modelInfo.providers.filter(supportsRequestedTier),
+		};
+		routingExpandedModelProviders = routingExpandedModelProviders.filter(
+			supportsRequestedTier,
+		);
+		allModelProviders = allModelProviders.filter(supportsRequestedTier);
 	}
 
 	// Fetch organization for coding model restriction check and credit validation
@@ -3522,7 +3754,6 @@ chat.openapi(completions, async (c) => {
 	let providerKey: InferSelectModel<typeof tables.providerKey> | undefined;
 	let usedToken: string | undefined;
 	let usedApiKeyHash: string | undefined;
-	let configIndex = 0; // Index for round-robin environment variables
 	let envVarName: string | undefined; // Environment variable name for health tracking
 	// ID for tracked-key health attribution. Equal to providerKey.id when the
 	// DB-provided key is what's actually sent. Cleared when a region-specific
@@ -4220,6 +4451,7 @@ chat.openapi(completions, async (c) => {
 			prompt_cache_key,
 			prompt_cache_retention,
 			n,
+			service_tier,
 		};
 
 		if (stream) {
@@ -4925,6 +5157,13 @@ chat.openapi(completions, async (c) => {
 			prompt_cache_retention,
 			providerCacheControlEnabled,
 			n,
+			getForwardedServiceTier(
+				usedInternalModel,
+				usedProvider,
+				usedRegion,
+				service_tier,
+				configIndex,
+			),
 		);
 	} catch (e) {
 		// Surface typed pre-upstream input errors in the activity feed as a
@@ -5129,6 +5368,7 @@ chat.openapi(completions, async (c) => {
 				),
 				n,
 				providerCacheControlEnabled,
+				service_tier,
 			},
 		);
 	}
@@ -5525,10 +5765,17 @@ chat.openapi(completions, async (c) => {
 					}
 
 					try {
+						const forwardedServiceTier = getForwardedServiceTier(
+							usedInternalModel,
+							usedProvider,
+							usedRegion,
+							service_tier,
+							configIndex,
+						);
 						const headers = getProviderHeaders(usedProvider, usedToken, {
 							requestId,
 							webSearchEnabled: !!webSearchTool,
-							serviceTier: service_tier,
+							serviceTier: forwardedServiceTier,
 						});
 						headers["Content-Type"] = "application/json";
 
@@ -5556,7 +5803,11 @@ chat.openapi(completions, async (c) => {
 
 						// For the Gemini Developer API the processing tier is a body
 						// field; Vertex uses a header set above in getProviderHeaders.
-						applyGoogleServiceTier(requestBody, usedProvider, service_tier);
+						applyGoogleServiceTier(
+							requestBody,
+							usedProvider,
+							forwardedServiceTier,
+						);
 
 						// Create a combined signal for both timeout and cancellation
 						const fetchSignal = createStreamingCombinedSignal(
@@ -5571,7 +5822,7 @@ chat.openapi(completions, async (c) => {
 							signal: fetchSignal,
 						});
 
-						logServiceTierRequest(usedProvider, service_tier, res);
+						logServiceTierRequest(usedProvider, forwardedServiceTier, res);
 						// AI Studio reports the served tier in a response header; Vertex
 						// reports it later in usageMetadata.trafficType (set below).
 						servedServiceTier = resolveServedServiceTier({
@@ -7714,6 +7965,13 @@ chat.openapi(completions, async (c) => {
 									}
 								}
 
+								if (usedProvider === "openai") {
+									const served = resolveOpenAIServiceTier(data);
+									if (served !== undefined) {
+										servedServiceTier = served;
+									}
+								}
+
 								// For Google providers, add usage information when available
 								if (isGoogleCompatibleProvider(usedProvider)) {
 									const usage = extractTokenUsage(
@@ -7723,7 +7981,17 @@ chat.openapi(completions, async (c) => {
 										imageByteSize,
 									);
 
-									logVertexTrafficType(usedProvider, service_tier, data);
+									logVertexTrafficType(
+										usedProvider,
+										getForwardedServiceTier(
+											usedInternalModel,
+											usedProvider,
+											usedRegion,
+											service_tier,
+											configIndex,
+										),
+										data,
+									);
 									{
 										const served = resolveServedServiceTier({
 											trafficType: data?.usageMetadata?.trafficType,
@@ -9337,10 +9605,17 @@ chat.openapi(completions, async (c) => {
 		res = undefined;
 
 		try {
+			const forwardedServiceTier = getForwardedServiceTier(
+				usedInternalModel,
+				usedProvider,
+				usedRegion,
+				service_tier,
+				configIndex,
+			);
 			const headers = getProviderHeaders(usedProvider, usedToken, {
 				requestId,
 				webSearchEnabled: !!webSearchTool,
-				serviceTier: service_tier,
+				serviceTier: forwardedServiceTier,
 			});
 			if (!(requestBody instanceof FormData)) {
 				headers["Content-Type"] = "application/json";
@@ -9383,7 +9658,7 @@ chat.openapi(completions, async (c) => {
 
 			// For the Gemini Developer API the processing tier is a body field;
 			// Vertex uses a header set above in getProviderHeaders.
-			applyGoogleServiceTier(requestBody, usedProvider, service_tier);
+			applyGoogleServiceTier(requestBody, usedProvider, forwardedServiceTier);
 
 			res = await fetch(url, {
 				method: "POST",
@@ -9395,7 +9670,7 @@ chat.openapi(completions, async (c) => {
 				signal: fetchSignal,
 			});
 
-			logServiceTierRequest(usedProvider, service_tier, res);
+			logServiceTierRequest(usedProvider, forwardedServiceTier, res);
 			// AI Studio reports the served tier in a response header; Vertex reports
 			// it later in usageMetadata.trafficType (set below).
 			servedServiceTier = resolveServedServiceTier({
@@ -10678,7 +10953,23 @@ chat.openapi(completions, async (c) => {
 		? parseInt(contentLengthHeader, 10)
 		: 0;
 
-	logVertexTrafficType(usedProvider, service_tier, json);
+	logVertexTrafficType(
+		usedProvider,
+		getForwardedServiceTier(
+			usedInternalModel,
+			usedProvider,
+			usedRegion,
+			service_tier,
+			configIndex,
+		),
+		json,
+	);
+	if (usedProvider === "openai") {
+		const served = resolveOpenAIServiceTier(json);
+		if (served !== undefined) {
+			servedServiceTier = served;
+		}
+	}
 	{
 		const served = resolveServedServiceTier({
 			trafficType: json?.usageMetadata?.trafficType,
@@ -10914,6 +11205,7 @@ chat.openapi(completions, async (c) => {
 		cacheCreation5mTokens,
 		cacheCreation1hTokens,
 		audioInputTokens,
+		usedProvider === "openai" ? readServiceTierValue(json) : undefined,
 	);
 	const transformedMetadata =
 		transformedResponse.metadata &&
