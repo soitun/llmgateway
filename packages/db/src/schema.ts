@@ -1520,6 +1520,13 @@ export const chat = pgTable(
 		userId: text()
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
+		// The organization context the chat was created under. Null means the
+		// default "Chat plan" context (legacy rows are treated as such). Used to
+		// keep chat history separated per selected organization. On org deletion
+		// the chat reverts to the Chat plan context rather than being removed.
+		organizationId: text().references(() => organization.id, {
+			onDelete: "set null",
+		}),
 		model: text().notNull(),
 		status: text({
 			enum: ["active", "archived", "deleted"],
@@ -2971,6 +2978,11 @@ export const playgroundImageHistory = pgTable(
 		userId: text()
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
+		// Organization context the generation was created under. Null means the
+		// default "Chat plan" context. Used to separate history per organization.
+		organizationId: text().references(() => organization.id, {
+			onDelete: "set null",
+		}),
 		prompt: text().notNull(),
 		inputImages: jsonb().$type<{ dataUrl: string; mediaType: string }[]>(),
 		models: jsonb().notNull().$type<
@@ -2997,6 +3009,11 @@ export const playgroundVideoHistory = pgTable(
 		userId: text()
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
+		// Organization context the generation was created under. Null means the
+		// default "Chat plan" context. Used to separate history per organization.
+		organizationId: text().references(() => organization.id, {
+			onDelete: "set null",
+		}),
 		prompt: text().notNull(),
 		frameInputs: jsonb().$type<{
 			start: { dataUrl: string; mediaType: string } | null;
