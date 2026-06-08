@@ -567,7 +567,7 @@ export const providers: ProviderDefinition[] = [
 			promptLogging: true,
 			retentionPeriod: null,
 		},
-		priority: 1.5,
+		priority: 2,
 	},
 	{
 		id: "alibaba",
@@ -651,7 +651,7 @@ export const providers: ProviderDefinition[] = [
 				region: "LLM_AWS_BEDROCK_REGION",
 			},
 		},
-		priority: 1.5,
+		priority: 2,
 		streaming: true,
 		cancellation: true,
 		color: "#FF9900",
@@ -756,7 +756,7 @@ export const providers: ProviderDefinition[] = [
 		apiKeyInstructions:
 			"The resource name can be found in your Azure base URL: https://<resource-name>.openai.azure.com",
 		learnMore: "https://docs.llmgateway.io/integrations/azure",
-		priority: 1.5,
+		priority: 2,
 		termsUrl: "https://www.microsoft.com/licensing/terms",
 		privacyPolicyUrl: "https://privacy.microsoft.com/privacystatement",
 		headquarters: "US",
@@ -1106,7 +1106,7 @@ export const providers: ProviderDefinition[] = [
 			promptLogging: true,
 			retentionPeriod: null,
 		},
-		priority: 1.5,
+		priority: 2,
 	},
 	{
 		id: "embercloud",
