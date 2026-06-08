@@ -10,6 +10,7 @@ import { minimaxModels } from "./models/minimax.js";
 import { mistralModels } from "./models/mistral.js";
 import { moonshotModels } from "./models/moonshot.js";
 import { nousresearchModels } from "./models/nousresearch.js";
+import { nvidiaModels } from "./models/nvidia.js";
 import { openaiModels } from "./models/openai.js";
 import { perplexityModels } from "./models/perplexity.js";
 import { xaiModels } from "./models/xai.js";
@@ -377,6 +378,13 @@ export interface ProviderModelMapping {
 	 */
 	jsonOutput?: boolean;
 	/**
+	 * Whether JSON-mode streaming output for this provider mapping should be
+	 * buffered and healed before being sent downstream. Use this for providers
+	 * that support JSON mode but may stream reasoning or explanatory text as
+	 * content before the final JSON object.
+	 */
+	healStreamingJsonOutput?: boolean;
+	/**
 	 * Whether this provider supports JSON schema output mode (json_schema response format)
 	 */
 	jsonOutputSchema?: boolean;
@@ -555,5 +563,6 @@ export const models = [
 	...alibabaModels,
 	...bytedanceModels,
 	...nousresearchModels,
+	...nvidiaModels,
 	...zaiModels,
 ] as const satisfies ModelDefinition[];
