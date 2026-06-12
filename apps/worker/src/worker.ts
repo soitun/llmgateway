@@ -711,12 +711,13 @@ export async function cleanupExpiredLogData(): Promise<void> {
 	}
 }
 
-export async function batchProcessLogs(): Promise<void> {
+export async function batchProcessLogs(): Promise<number> {
 	const lockAcquired = await acquireLock(CREDIT_PROCESSING_LOCK_KEY);
 	if (!lockAcquired) {
-		return;
+		return 0;
 	}
 
+	let processedCount = 0;
 	const deductedOrgIds: string[] = [];
 	// LLM SDK: wallets that crossed below the low-balance threshold this
 	// batch — webhooks are enqueued after the transaction commits.
@@ -728,7 +729,10 @@ export async function batchProcessLogs(): Promise<void> {
 	}> = [];
 
 	try {
-		await db.transaction(async (tx) => {
+		// Only batches that actually commit count toward processedCount, so a
+		// rolled-back transaction leaves it at 0 and the loop backs off instead
+		// of hot-looping on a failing batch.
+		processedCount = await db.transaction(async (tx) => {
 			// Get unprocessed logs with row-level locking to prevent concurrent processing
 			const rows = await tx
 				.select({
@@ -778,7 +782,7 @@ export async function batchProcessLogs(): Promise<void> {
 			const unprocessedLogs = { rows };
 
 			if (unprocessedLogs.rows.length === 0) {
-				return;
+				return 0;
 			}
 
 			logger.info(
@@ -1321,6 +1325,8 @@ export async function batchProcessLogs(): Promise<void> {
 				.where(inArray(log.id, logIds));
 
 			logger.debug(`Marked ${logIds.length} logs as processed`);
+
+			return unprocessedLogs.rows.length;
 		});
 
 		// Async low-balance alert check (outside transaction, non-blocking)
@@ -1356,6 +1362,8 @@ export async function batchProcessLogs(): Promise<void> {
 	} finally {
 		await releaseLock(CREDIT_PROCESSING_LOCK_KEY);
 	}
+
+	return processedCount;
 }
 
 async function checkLowBalanceAlerts(orgIds: string[]): Promise<void> {
@@ -1741,9 +1749,15 @@ async function runBatchProcessLoop() {
 	try {
 		while (!isStopRequested()) {
 			try {
-				await batchProcessLogs();
+				const processed = await batchProcessLogs();
 
-				await interruptibleSleep(interval);
+				// A full batch means more unprocessed logs remain, so loop straight
+				// into the next batch instead of sleeping. Without this the loop is
+				// hard-capped at CREDIT_BATCH_SIZE / interval logs per second (e.g.
+				// 100 / 5s = 20/s) regardless of how far behind credit processing is.
+				if (processed < CREDIT_BATCH_SIZE) {
+					await interruptibleSleep(interval);
+				}
 			} catch (error) {
 				logger.error(
 					"Error in batch process loop",
