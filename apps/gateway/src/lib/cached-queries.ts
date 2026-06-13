@@ -21,7 +21,6 @@ import {
 	ne,
 	or,
 	cdb as db,
-	db as uncachedDb,
 	apiKey as apiKeyTable,
 	apiKeyIamRule as apiKeyIamRuleTable,
 	discount as discountTable,
@@ -270,26 +269,45 @@ export async function findProjectById(
 	});
 }
 
+// TTL for the "fresh" credit/balance refetch below. A zero-credit org or
+// zero-balance wallet otherwise refetches on EVERY request; under high
+// throughput that is one Postgres SELECT per request (and the DB pool, max 20,
+// saturates). A short TTL still reflects topups/debits within FRESH_TTL_SECONDS
+// while collapsing per-request DB load to at most one query per window per row.
+const FRESH_TTL_SECONDS = 2;
+
 /**
- * Find an organization by ID without cache (for fresh credit checks)
+ * Find an organization by ID with a short-TTL fresh read (for near-fresh credit
+ * checks when the org shows <= 0 credits). Uses a distinct Drizzle cache tag AND
+ * a distinct SWR mirror key (`org:fresh:${id}`) so it does not collide with the
+ * longer-lived `findOrganizationById` entry. The distinct mirror key matters:
+ * sharing it would let the (possibly stale-zero) regular read claim the mirror
+ * write-throttle slot and suppress this fresh value's mirror write, so a DB
+ * outage right after a topup could keep serving the stale-zero fallback.
  */
-export async function findOrganizationByIdUncached(
+export async function findOrganizationByIdFresh(
 	id: string,
 ): Promise<Organization | undefined> {
-	return await swrWrap(`org:${id}`, [organizationTableName], async () => {
-		const results = await uncachedDb
+	return await swrWrap(`org:fresh:${id}`, [organizationTableName], async () => {
+		const results = await db
 			.select()
 			.from(organizationTable)
 			.where(eq(organizationTable.id, id))
-			.limit(1);
+			.limit(1)
+			.$withCache({
+				tag: `org-fresh:${id}`,
+				autoInvalidate: false,
+				config: { ex: FRESH_TTL_SECONDS },
+			});
 		return results[0];
 	});
 }
 
 /**
  * Find an organization by ID (cacheable)
- * When the organization has 0 credits, refetch without cache to ensure
- * no delay in reflecting topups and usage updates.
+ * When the organization has 0 credits, refetch via a short-TTL fresh read so
+ * topups and usage updates are reflected within FRESH_TTL_SECONDS without
+ * hitting Postgres on every request.
  */
 export async function findOrganizationById(
 	id: string,
@@ -303,8 +321,8 @@ export async function findOrganizationById(
 		return results[0];
 	});
 
-	// If org has 0 or negative credits, refetch without cache
-	// to ensure topups are reflected immediately
+	// If org has 0 or negative credits, refetch via the short-TTL fresh read
+	// so topups are reflected promptly without a per-request Postgres hit
 	if (org) {
 		const regularCredits = parseFloat(org.credits || "0");
 		const devPlanCreditsUsed = parseFloat(org.devPlanCreditsUsed || "0");
@@ -319,7 +337,7 @@ export async function findOrganizationById(
 			regularCredits + devPlanCreditsRemaining + chatPlanCreditsRemaining;
 
 		if (totalCredits <= 0) {
-			return await findOrganizationByIdUncached(id);
+			return await findOrganizationByIdFresh(id);
 		}
 	}
 
@@ -327,25 +345,34 @@ export async function findOrganizationById(
 }
 
 /**
- * Find an end-user wallet by ID without cache (for fresh balance checks)
+ * Find an end-user wallet by ID with a short-TTL fresh read (for near-fresh
+ * balance checks when the wallet shows <= 0 balance). Uses a distinct Drizzle
+ * cache tag AND a distinct SWR mirror key (`wallet:fresh:${id}`) so it does not
+ * collide with the longer-lived `findWalletById` entry — see
+ * `findOrganizationByIdFresh` for why the distinct mirror key matters.
  */
-export async function findWalletByIdUncached(
+export async function findWalletByIdFresh(
 	id: string,
 ): Promise<Wallet | undefined> {
-	return await swrWrap(`wallet:${id}`, [walletTableName], async () => {
-		const results = await uncachedDb
+	return await swrWrap(`wallet:fresh:${id}`, [walletTableName], async () => {
+		const results = await db
 			.select()
 			.from(walletTable)
 			.where(eq(walletTable.id, id))
-			.limit(1);
+			.limit(1)
+			.$withCache({
+				tag: `wallet-fresh:${id}`,
+				autoInvalidate: false,
+				config: { ex: FRESH_TTL_SECONDS },
+			});
 		return results[0];
 	});
 }
 
 /**
  * Find an end-user wallet by ID (cacheable). Mirrors findOrganizationById: when
- * the wallet balance is 0 or negative, refetch without cache so top-ups and
- * usage debits are reflected immediately.
+ * the wallet balance is 0 or negative, refetch via a short-TTL fresh read so
+ * top-ups and usage debits are reflected promptly without a per-request DB hit.
  */
 export async function findWalletById(id: string): Promise<Wallet | undefined> {
 	const w = await swrWrap(`wallet:${id}`, [walletTableName], async () => {
@@ -358,7 +385,7 @@ export async function findWalletById(id: string): Promise<Wallet | undefined> {
 	});
 
 	if (w && parseFloat(w.balance || "0") <= 0) {
-		return await findWalletByIdUncached(id);
+		return await findWalletByIdFresh(id);
 	}
 
 	return w;
