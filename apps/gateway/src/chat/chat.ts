@@ -98,6 +98,7 @@ import {
 	InvalidFileContentError,
 	parseGoogleUpstreamDocumentError,
 	prepareRequestBody,
+	RequestError,
 	UnsupportedAudioFormatError,
 	UnsupportedDocumentFormatError,
 	type RoutingMetadata,
@@ -5874,8 +5875,10 @@ chat.openapi(completions, async (c) => {
 		if (
 			e instanceof InvalidFileContentError ||
 			e instanceof UnsupportedAudioFormatError ||
-			e instanceof UnsupportedDocumentFormatError
+			e instanceof UnsupportedDocumentFormatError ||
+			e instanceof RequestError
 		) {
+			const statusCode = e instanceof RequestError ? e.statusCode : 400;
 			try {
 				await insertLogEntry({
 					...createLogEntry(
@@ -5917,7 +5920,7 @@ chat.openapi(completions, async (c) => {
 					streamed: !!stream,
 					canceled: false,
 					errorDetails: {
-						statusCode: 400,
+						statusCode,
 						statusText: "Bad Request",
 						responseText: e.message,
 						cause: e.constructor.name,
