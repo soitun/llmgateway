@@ -1379,6 +1379,7 @@ export async function prepareRequestBody(
 
 	switch (usedProvider) {
 		case "azure":
+		case "sakana":
 		case "openai": {
 			// Determine whether to use Responses API format.
 			// If useResponsesApi is explicitly passed (derived from endpoint URL), use it.
@@ -1408,11 +1409,22 @@ export async function prepareRequestBody(
 				const transformedMessages =
 					transformMessagesForResponsesApi(processedMessages);
 
+				// Fugu always reasons and only accepts "high"/"xhigh" effort — it has
+				// no off switch and rejects none/minimal/low/medium — so every tier at
+				// or below "high" (including a dropped "none") collapses onto its
+				// minimum ("high"), and "max" maps to its top tier ("xhigh").
+				const responsesReasoningEffort =
+					usedProvider === "sakana"
+						? reasoning_effort === "xhigh" || reasoning_effort === "max"
+							? "xhigh"
+							: "high"
+						: (genericReasoningEffort ?? defaultEffort);
+
 				const responsesBody: OpenAIResponsesRequestBody = {
 					model: usedExternalId,
 					input: transformedMessages,
 					reasoning: {
-						effort: genericReasoningEffort ?? defaultEffort,
+						effort: responsesReasoningEffort,
 						summary: "detailed",
 					},
 				};
@@ -1588,7 +1600,17 @@ export async function prepareRequestBody(
 					requestBody.presence_penalty = presence_penalty;
 				}
 				if (reasoning_effort !== undefined) {
-					requestBody.reasoning_effort = genericReasoningEffort;
+					if (usedProvider === "sakana") {
+						// Streaming Fugu uses Chat Completions, which (like its Responses
+						// API) only accepts "high"/"xhigh"/"max". Collapse the lower
+						// OpenAI tiers onto "high".
+						requestBody.reasoning_effort =
+							reasoning_effort === "xhigh" || reasoning_effort === "max"
+								? reasoning_effort
+								: "high";
+					} else {
+						requestBody.reasoning_effort = genericReasoningEffort;
+					}
 				}
 				if (n !== undefined && n > 1) {
 					requestBody.n = n;
