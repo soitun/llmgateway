@@ -343,7 +343,7 @@ export const providers: ProviderDefinition[] = [
 		privacyPolicyUrl: null,
 		headquarters: null,
 		dataPolicy: null,
-		priority: 1.2,
+		priority: 1.5,
 	},
 	{
 		id: "google-vertex",
