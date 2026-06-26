@@ -1787,12 +1787,13 @@ chat.openapi(completions, async (c) => {
 		}
 	}
 
-	// Text-to-speech and video models are served by dedicated endpoints
-	// (/v1/audio/speech and /v1/videos). Routing them through chat completions
-	// would fall through to a confusing "requires a baseUrl" error during
-	// endpoint resolution, so reject them early with a pointer to the right
-	// endpoint. Image-only models (e.g. reve, grok-image) are intentionally
-	// allowed here — they are served by the chat-completions image flow.
+	// Models whose sole output capability isn’t text or image are served by
+	// dedicated endpoints (/v1/audio/speech, /v1/videos, /v1/ocr,
+	// /v1/embeddings). Routing them through chat completions would fall through
+	// to a confusing "requires a baseUrl" error during endpoint resolution, so
+	// reject them early with a pointer to the right endpoint. Image-only models
+	// (e.g. reve, grok-image) are intentionally allowed here — they are served
+	// by the chat-completions image flow.
 	const modelOutput = modelInfo.output;
 	if (modelOutput && !modelOutput.includes("text")) {
 		if (modelOutput.includes("audio")) {
@@ -1803,6 +1804,16 @@ chat.openapi(completions, async (c) => {
 		if (modelOutput.includes("video")) {
 			throw new HTTPException(400, {
 				message: `Model ${requestedModel} is a video generation model and is not available on the chat completions endpoint. Use the /v1/videos endpoint instead.`,
+			});
+		}
+		if (modelOutput.includes("ocr")) {
+			throw new HTTPException(400, {
+				message: `Model ${requestedModel} is an OCR model and is not available on the chat completions endpoint. Use the /v1/ocr endpoint instead.`,
+			});
+		}
+		if (modelOutput.includes("embedding")) {
+			throw new HTTPException(400, {
+				message: `Model ${requestedModel} is an embedding model and is not available on the chat completions endpoint. Use the /v1/embeddings endpoint instead.`,
 			});
 		}
 	}
