@@ -8856,6 +8856,7 @@ chat.openapi(completions, async (c) => {
 									{
 										const served = resolveServedServiceTier({
 											trafficType: data?.usageMetadata?.trafficType,
+											serviceTierBody: data?.usageMetadata?.serviceTier,
 										});
 										if (served) {
 											servedServiceTier = served;
@@ -12019,6 +12020,7 @@ chat.openapi(completions, async (c) => {
 	{
 		const served = resolveServedServiceTier({
 			trafficType: json?.usageMetadata?.trafficType,
+			serviceTierBody: json?.usageMetadata?.serviceTier,
 		});
 		if (served) {
 			servedServiceTier = served;
