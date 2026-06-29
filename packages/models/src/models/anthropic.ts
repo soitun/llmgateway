@@ -610,7 +610,6 @@ export const anthropicModels = [
 			"Free, fast, efficient model for high-volume, low-latency applications.",
 		family: "anthropic",
 		free: true,
-		stability: "unstable",
 		releasedAt: new Date("2025-10-15"),
 		providers: [
 			{
