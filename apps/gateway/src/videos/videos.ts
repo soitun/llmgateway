@@ -64,6 +64,8 @@ import {
 	type ModelDefinition,
 	type Provider,
 	type ProviderModelMapping,
+	resolveVertexTokenType,
+	type VertexTokenType,
 } from "@llmgateway/models";
 import {
 	getAvalancheApiBaseUrl,
@@ -605,7 +607,37 @@ interface ProviderContext {
 	configIndex: number | null;
 	vertexProjectId?: string;
 	vertexRegion?: string;
+	vertexTokenType?: VertexTokenType;
 	uploadBaseUrl?: string;
+}
+
+/**
+ * Resolve the Vertex token type for video requests so the upstream call can
+ * choose between `?key=` (API key) and `Authorization: Bearer` (OAuth2). BYOK
+ * keys resolve from the provider-key option (env skipped); env-backed tokens
+ * resolve from the `LLM_GOOGLE_VERTEX_TOKEN_TYPE` env var.
+ */
+function resolveVideoVertexTokenType(
+	providerId: Provider,
+	providerKey: InferSelectModel<typeof tables.providerKey> | undefined,
+	configIndex: number | null,
+): VertexTokenType | undefined {
+	if (providerId !== "google-vertex") {
+		return undefined;
+	}
+	return providerKey
+		? resolveVertexTokenType(
+				providerId,
+				providerKey.options ?? undefined,
+				undefined,
+				true,
+			)
+		: resolveVertexTokenType(
+				providerId,
+				undefined,
+				configIndex ?? undefined,
+				false,
+			);
 }
 
 interface ResolvedVideoExecution {
@@ -1422,6 +1454,11 @@ async function resolveProviderContext(
 			configIndex: null,
 			vertexProjectId: sharedVertexProjectId,
 			vertexRegion: sharedVertexRegion,
+			vertexTokenType: resolveVideoVertexTokenType(
+				providerId,
+				providerKey,
+				null,
+			),
 			uploadBaseUrl:
 				providerId === "avalanche"
 					? getProviderEnvValue(providerId, "fileUploadBaseUrl")
@@ -1472,6 +1509,11 @@ async function resolveProviderContext(
 			configIndex: env.configIndex,
 			vertexProjectId,
 			vertexRegion,
+			vertexTokenType: resolveVideoVertexTokenType(
+				providerId,
+				undefined,
+				env.configIndex,
+			),
 			uploadBaseUrl:
 				providerId === "avalanche"
 					? getProviderEnvValue(
@@ -1518,6 +1560,11 @@ async function resolveProviderContext(
 			configIndex: null,
 			vertexProjectId: sharedVertexProjectId,
 			vertexRegion: sharedVertexRegion,
+			vertexTokenType: resolveVideoVertexTokenType(
+				providerId,
+				providerKey,
+				null,
+			),
 			uploadBaseUrl:
 				providerId === "avalanche"
 					? getProviderEnvValue(providerId, "fileUploadBaseUrl")
@@ -3123,11 +3170,10 @@ async function createGoogleVertexVideoJob(
 		providerContext.baseUrl,
 		`/v1/projects/${vertexProjectId}/locations/${providerContext.vertexRegion}/publishers/google/models/${upstreamModelName}:predictLongRunning`,
 	);
-	const authenticatedUpstreamUrl = appendQueryParam(
-		upstreamUrl,
-		"key",
-		providerContext.token,
-	);
+	const useOAuth = providerContext.vertexTokenType === "oauth";
+	const authenticatedUpstreamUrl = useOAuth
+		? upstreamUrl
+		: appendQueryParam(upstreamUrl, "key", providerContext.token);
 	const upstreamRequest = {
 		instances: [
 			{
@@ -3158,6 +3204,7 @@ async function createGoogleVertexVideoJob(
 		headers: {
 			"Content-Type": "application/json",
 			"x-request-id": providerContext.requestId,
+			...(useOAuth ? { Authorization: `Bearer ${providerContext.token}` } : {}),
 		},
 		body: JSON.stringify(upstreamRequest),
 	});

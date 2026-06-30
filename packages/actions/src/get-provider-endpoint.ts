@@ -5,8 +5,10 @@ import {
 	type ProviderDefinition,
 	type ProviderModelMapping,
 	type ProviderId,
+	type VertexTokenType,
 	getProviderEnvValue,
 	getProviderEnvConfig,
+	resolveVertexTokenType,
 } from "@llmgateway/models";
 
 import type { ProviderKeyOptions } from "@llmgateway/db";
@@ -40,6 +42,8 @@ function buildVertexCompatibleEndpoint(
 	stream: boolean | undefined,
 	configIndex: number | undefined,
 	providerKeyOptions?: ProviderKeyOptions,
+	skipEnvVars?: boolean,
+	vertexTokenType?: VertexTokenType,
 ): string {
 	const endpoint = stream ? "streamGenerateContent" : "generateContent";
 	const model = externalId ?? "gemini-2.5-flash-lite";
@@ -57,9 +61,21 @@ function buildVertexCompatibleEndpoint(
 		);
 	}
 
+	// Only Google Vertex supports OAuth bearer auth; Quartz always uses the
+	// `?key=` API-key query param.
+	const tokenType =
+		provider === "google-vertex"
+			? (vertexTokenType ??
+				resolveVertexTokenType(
+					provider,
+					providerKeyOptions,
+					configIndex,
+					skipEnvVars,
+				))
+			: "api-key";
 	const baseEndpoint = `${url}/v1/projects/${projectId}/locations/${region}/publishers/google/models/${model}:${endpoint}`;
 	const queryParams = [];
-	if (token) {
+	if (token && tokenType === "api-key") {
 		queryParams.push(`key=${token}`);
 	}
 	if (stream) {
@@ -96,6 +112,7 @@ export function getProviderEndpoint(
 	region?: string,
 	skipEnvVars?: boolean,
 	modelId?: string,
+	vertexTokenType?: VertexTokenType,
 ): string {
 	let externalId = model;
 	let providerMapping: ProviderModelMapping | undefined;
@@ -442,6 +459,8 @@ export function getProviderEndpoint(
 				stream,
 				configIndex,
 				providerKeyOptions,
+				skipEnvVars,
+				vertexTokenType,
 			);
 		case "vertex-openai": {
 			const projectId =
