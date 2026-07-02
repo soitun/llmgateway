@@ -7,8 +7,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
-import { assertApiKeyWithinUsageLimits } from "@/lib/api-key-usage-limits.js";
-import { findApiKeyByToken } from "@/lib/cached-queries.js";
+import {
+	assertApiKeyWithinUsageLimits,
+	assertMemberWithinBudget,
+} from "@/lib/api-key-usage-limits.js";
+import { findApiKeyByToken, findProjectById } from "@/lib/cached-queries.js";
 import { parseApiToken } from "@/lib/extract-api-token.js";
 
 import { parseDataUrl } from "@llmgateway/actions";
@@ -1159,7 +1162,19 @@ export async function mcpHandler(c: Context): Promise<Response> {
 
 	try {
 		assertApiKeyWithinUsageLimits(apiKeyRecord);
+		// Enforce the per-member budget set on the Teams page (fails open on read
+		// errors). Resolve the project so the org is known for the creator lookup.
+		const mcpProject = await findProjectById(apiKeyRecord.projectId);
+		if (mcpProject) {
+			await assertMemberWithinBudget(
+				apiKeyRecord.createdBy,
+				mcpProject.organizationId,
+			);
+		}
 	} catch (error) {
+		// Preserve the thrown status: assertMemberWithinBudget uses 403 for a
+		// budget breach, which must not be flattened into a 401 (invalid key).
+		const status = error instanceof HTTPException ? error.status : 401;
 		return c.json(
 			{
 				jsonrpc: "2.0",
@@ -1172,7 +1187,7 @@ export async function mcpHandler(c: Context): Promise<Response> {
 				},
 				id: null,
 			},
-			401,
+			status,
 		);
 	}
 

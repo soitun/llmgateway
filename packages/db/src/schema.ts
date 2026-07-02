@@ -297,6 +297,16 @@ export const organization = pgTable(
 		// accrued end-user margin. Null until they onboard.
 		stripeConnectAccountId: text().unique(),
 		stripeConnectOnboarded: boolean().notNull().default(false),
+		// Org-wide default budget applied to every "developer" member. A member's
+		// own per-member budget (on user_organization) overrides these field by
+		// field. null = no default. Same shape as the per-member budget.
+		defaultDeveloperMaxApiKeys: integer(),
+		defaultDeveloperUsageLimit: decimal(),
+		defaultDeveloperPeriodUsageLimit: decimal(),
+		defaultDeveloperPeriodUsageDurationValue: integer(),
+		defaultDeveloperPeriodUsageDurationUnit: text({
+			enum: ["hour", "day", "week", "month"],
+		}),
 	},
 	(table) => [
 		index("organization_dev_plan_card_fingerprint_idx").on(
@@ -598,10 +608,50 @@ export const userOrganization = pgTable(
 		})
 			.notNull()
 			.default("owner"),
+		// Per-member budgets (config only; spend is read from existing per-key
+		// sources — apiKey.usage and apiKeyHourlyStats.cost — so no counters here).
+		// null = unlimited.
+		maxApiKeys: integer(),
+		usageLimit: decimal(),
+		periodUsageLimit: decimal(),
+		periodUsageDurationValue: integer(),
+		periodUsageDurationUnit: text({
+			enum: ["hour", "day", "week", "month"],
+		}),
 	},
 	(table) => [
 		index("user_organization_user_id_idx").on(table.userId),
 		index("user_organization_organization_id_idx").on(table.organizationId),
+	],
+);
+
+// Project-level access grants for project-scoped members. Owners/admins have
+// implicit access to every project in their org (no rows here); "developer"
+// members are limited to the projects granted via this table. Keyed on the
+// membership so grants cascade-delete when a member is removed from the org.
+export const userProject = pgTable(
+	"user_project",
+	{
+		id: text().primaryKey().notNull().$defaultFn(shortid),
+		createdAt: timestamp().notNull().defaultNow(),
+		updatedAt: timestamp()
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+		userOrganizationId: text()
+			.notNull()
+			.references(() => userOrganization.id, { onDelete: "cascade" }),
+		projectId: text()
+			.notNull()
+			.references(() => project.id, { onDelete: "cascade" }),
+	},
+	(table) => [
+		uniqueIndex("user_project_membership_project_unique").on(
+			table.userOrganizationId,
+			table.projectId,
+		),
+		index("user_project_user_organization_id_idx").on(table.userOrganizationId),
+		index("user_project_project_id_idx").on(table.projectId),
 	],
 );
 
@@ -2260,6 +2310,7 @@ export const auditLogActions = [
 	// Team
 	"team_member.add",
 	"team_member.update",
+	"team_member.budget_update",
 	"team_member.remove",
 	// API Key
 	"api_key.create",

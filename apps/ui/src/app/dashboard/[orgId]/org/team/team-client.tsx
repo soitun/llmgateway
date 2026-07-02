@@ -1,7 +1,16 @@
 "use client";
 
 import { format, subDays } from "date-fns";
-import { BarChart3Icon, Info, KeyRound, Mail, TrendingUp } from "lucide-react";
+import {
+	BarChart3Icon,
+	ChevronsUpDown,
+	Info,
+	KeyRound,
+	Mail,
+	MoreHorizontal,
+	TrendingUp,
+	X,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -13,10 +22,14 @@ import {
 	useTeamMembers,
 	useAddTeamMember,
 	useUpdateTeamMember,
+	useUpdateMemberBudget,
+	useUpdateDefaultDeveloperBudget,
 	useRemoveTeamMember,
+	type TeamMembersData,
 } from "@/hooks/useTeam";
 import { useUser } from "@/hooks/useUser";
 import { Alert, AlertDescription } from "@/lib/components/alert";
+import { Badge } from "@/lib/components/badge";
 import { Button } from "@/lib/components/button";
 import {
 	Card,
@@ -25,6 +38,14 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/lib/components/card";
+import {
+	Command,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+} from "@/lib/components/command";
 import {
 	Dialog,
 	DialogContent,
@@ -35,12 +56,25 @@ import {
 	DialogTrigger,
 } from "@/lib/components/dialog";
 import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/lib/components/dropdown-menu";
+import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
 } from "@/lib/components/hover-card";
 import { Input } from "@/lib/components/input";
 import { Label } from "@/lib/components/label";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/lib/components/popover";
 import {
 	Select,
 	SelectContent,
@@ -110,7 +144,7 @@ const ROLE_PERMISSIONS = [
 	{
 		role: "Restricted Access",
 		description:
-			"If you want a user to just access the API but not the dashboard or settings, just add an API key for them, where you can also set specific permissions.",
+			"If you want a user to just access the API but not the dashboard or settings, just add an API key for them, where you can also set specific permissions. Use “Manage budget” to cap a member's active API keys and their total or per-period spend.",
 	},
 ] as const;
 
@@ -149,15 +183,17 @@ function MemberUsageUpsell() {
 					</div>
 					<div className="space-y-1">
 						<h3 className="text-sm font-semibold">
-							See usage by team member
+							SSO, User limits, self-provisioning & User Analytics
 							<span className="text-muted-foreground ml-2 text-xs font-normal">
 								Enterprise
 							</span>
 						</h3>
 						<p className="text-muted-foreground max-w-xl text-sm">
-							Upgrade to Enterprise to break down cost, tokens, requests, and
-							error rate per member — with a drill-down into the models,
-							providers, and apps each person uses most, over any time period.
+							Upgrade to Enterprise to add SSO for one-click team sign-in, scope
+							developers to specific projects with per-user spend and API-key
+							limits, let them self-provision their own keys, and break usage
+							down per member — cost, tokens, requests, and error rate, with a
+							drill-down by model and provider over any time period.
 						</p>
 					</div>
 				</div>
@@ -172,7 +208,582 @@ function MemberUsageUpsell() {
 	);
 }
 
-export function TeamClient() {
+type TeamMember = NonNullable<
+	ReturnType<typeof useTeamMembers>["data"]
+>["members"][number];
+
+const PERIOD_UNITS = ["hour", "day", "week", "month"] as const;
+
+function budgetBadges(budget: TeamMember["budget"]): string[] {
+	const badges: string[] = [];
+	if (!budget) {
+		return badges;
+	}
+	if (budget.usageLimit !== null) {
+		badges.push(`${currencyFormatter.format(Number(budget.usageLimit))} total`);
+	}
+	if (
+		budget.periodUsageLimit !== null &&
+		budget.periodUsageDurationValue !== null &&
+		budget.periodUsageDurationUnit !== null
+	) {
+		const value = budget.periodUsageDurationValue;
+		const unit = budget.periodUsageDurationUnit;
+		const period = value === 1 ? unit : `${value} ${unit}s`;
+		badges.push(
+			`${currencyFormatter.format(Number(budget.periodUsageLimit))}/${period}`,
+		);
+	}
+	if (budget.maxApiKeys !== null) {
+		badges.push(
+			`${budget.maxApiKeys} ${budget.maxApiKeys === 1 ? "key" : "keys"}`,
+		);
+	}
+	return badges;
+}
+
+function ManageBudgetDialog({
+	organizationId,
+	member,
+	onClose,
+}: {
+	organizationId: string;
+	member: TeamMember;
+	onClose: () => void;
+}) {
+	const updateBudget = useUpdateMemberBudget(organizationId);
+	const budget = member.budget;
+
+	const [maxApiKeys, setMaxApiKeys] = useState(
+		budget && budget.maxApiKeys !== null ? String(budget.maxApiKeys) : "",
+	);
+	const [usageLimit, setUsageLimit] = useState(budget?.usageLimit ?? "");
+	const [periodUsageLimit, setPeriodUsageLimit] = useState(
+		budget?.periodUsageLimit ?? "",
+	);
+	const [periodValue, setPeriodValue] = useState(
+		budget && budget.periodUsageDurationValue !== null
+			? String(budget.periodUsageDurationValue)
+			: "1",
+	);
+	const [periodUnit, setPeriodUnit] = useState<(typeof PERIOD_UNITS)[number]>(
+		budget?.periodUsageDurationUnit ?? "month",
+	);
+
+	const memberName = member.user.name ?? member.user.email;
+
+	const handleSave = async () => {
+		const trimmedPeriodLimit = periodUsageLimit.trim();
+		const hasPeriod = trimmedPeriodLimit !== "";
+
+		await updateBudget.mutateAsync({
+			params: {
+				path: {
+					organizationId,
+					memberId: member.id,
+				},
+			},
+			body: {
+				maxApiKeys: maxApiKeys.trim() === "" ? null : Number(maxApiKeys),
+				usageLimit: usageLimit.trim() === "" ? null : usageLimit.trim(),
+				periodUsageLimit: hasPeriod ? trimmedPeriodLimit : null,
+				periodUsageDurationValue: hasPeriod ? Number(periodValue) : null,
+				periodUsageDurationUnit: hasPeriod ? periodUnit : null,
+			},
+		});
+
+		toast({
+			title: "Success",
+			description: "Member budget updated successfully",
+		});
+		onClose();
+	};
+
+	return (
+		<Dialog open onOpenChange={(o) => (o ? undefined : onClose())}>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>Manage budget</DialogTitle>
+					<DialogDescription>
+						Set spend and API-key limits for {memberName}. Limits are enforced
+						on the gateway at request time. Leave a field blank for unlimited.
+					</DialogDescription>
+				</DialogHeader>
+				<div className="space-y-4 py-4">
+					<div className="text-muted-foreground grid grid-cols-3 gap-2 text-xs">
+						<div>
+							<div className="text-foreground font-medium">
+								{currencyFormatter.format(member.spend?.lifetime ?? 0)}
+							</div>
+							Lifetime spend
+						</div>
+						<div>
+							<div className="text-foreground font-medium">
+								{typeof member.spend?.currentPeriod === "number"
+									? currencyFormatter.format(member.spend.currentPeriod)
+									: "—"}
+							</div>
+							Period spend
+						</div>
+						<div>
+							<div className="text-foreground font-medium">
+								{member.spend?.activeApiKeys ?? 0}
+							</div>
+							Active API keys
+						</div>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="max-api-keys">Max active API keys</Label>
+						<Input
+							id="max-api-keys"
+							type="number"
+							min={0}
+							placeholder="Unlimited"
+							value={maxApiKeys}
+							onChange={(e) => setMaxApiKeys(e.target.value)}
+						/>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="usage-limit">Total spend limit ($)</Label>
+						<Input
+							id="usage-limit"
+							type="number"
+							min={0}
+							step="0.01"
+							placeholder="Unlimited"
+							value={usageLimit}
+							onChange={(e) => setUsageLimit(e.target.value)}
+						/>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="period-usage-limit">Period spend limit ($)</Label>
+						<Input
+							id="period-usage-limit"
+							type="number"
+							min={0}
+							step="0.01"
+							placeholder="No period limit"
+							value={periodUsageLimit}
+							onChange={(e) => setPeriodUsageLimit(e.target.value)}
+						/>
+						<div className="flex items-center gap-2">
+							<span className="text-muted-foreground text-sm">per</span>
+							<Input
+								type="number"
+								min={1}
+								className="w-20"
+								value={periodValue}
+								onChange={(e) => setPeriodValue(e.target.value)}
+							/>
+							<Select
+								value={periodUnit}
+								onValueChange={(value) =>
+									setPeriodUnit(value as (typeof PERIOD_UNITS)[number])
+								}
+							>
+								<SelectTrigger className="w-[130px]">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{PERIOD_UNITS.map((unit) => (
+										<SelectItem key={unit} value={unit}>
+											{unit}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					</div>
+				</div>
+				<DialogFooter>
+					<Button variant="outline" onClick={onClose}>
+						Cancel
+					</Button>
+					<Button onClick={handleSave} disabled={updateBudget.isPending}>
+						{updateBudget.isPending ? "Saving..." : "Save budget"}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+function DefaultDeveloperLimitsDialog({
+	organizationId,
+	budget,
+	onClose,
+}: {
+	organizationId: string;
+	budget: TeamMember["budget"];
+	onClose: () => void;
+}) {
+	const updateDefault = useUpdateDefaultDeveloperBudget(organizationId);
+
+	const [maxApiKeys, setMaxApiKeys] = useState(
+		budget && budget.maxApiKeys !== null ? String(budget.maxApiKeys) : "",
+	);
+	const [usageLimit, setUsageLimit] = useState(budget?.usageLimit ?? "");
+	const [periodUsageLimit, setPeriodUsageLimit] = useState(
+		budget?.periodUsageLimit ?? "",
+	);
+	const [periodValue, setPeriodValue] = useState(
+		budget && budget.periodUsageDurationValue !== null
+			? String(budget.periodUsageDurationValue)
+			: "1",
+	);
+	const [periodUnit, setPeriodUnit] = useState<(typeof PERIOD_UNITS)[number]>(
+		budget?.periodUsageDurationUnit ?? "month",
+	);
+
+	const handleSave = async () => {
+		const trimmedPeriodLimit = periodUsageLimit.trim();
+		const hasPeriod = trimmedPeriodLimit !== "";
+
+		await updateDefault.mutateAsync({
+			params: { path: { organizationId } },
+			body: {
+				maxApiKeys: maxApiKeys.trim() === "" ? null : Number(maxApiKeys),
+				usageLimit: usageLimit.trim() === "" ? null : usageLimit.trim(),
+				periodUsageLimit: hasPeriod ? trimmedPeriodLimit : null,
+				periodUsageDurationValue: hasPeriod ? Number(periodValue) : null,
+				periodUsageDurationUnit: hasPeriod ? periodUnit : null,
+			},
+		});
+
+		toast({
+			title: "Success",
+			description: "Default developer limits updated",
+		});
+		onClose();
+	};
+
+	return (
+		<Dialog open onOpenChange={(o) => (o ? undefined : onClose())}>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>Default developer limits</DialogTitle>
+					<DialogDescription>
+						Applied to every developer in the org. A developer's own limits (set
+						via “Manage budget”) override these. Leave a field blank for
+						unlimited.
+					</DialogDescription>
+				</DialogHeader>
+				<div className="space-y-4 py-4">
+					<div className="space-y-2">
+						<Label htmlFor="default-max-api-keys">Max active API keys</Label>
+						<Input
+							id="default-max-api-keys"
+							type="number"
+							min={0}
+							placeholder="Unlimited"
+							value={maxApiKeys}
+							onChange={(e) => setMaxApiKeys(e.target.value)}
+						/>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="default-usage-limit">Total spend limit ($)</Label>
+						<Input
+							id="default-usage-limit"
+							type="number"
+							min={0}
+							step="0.01"
+							placeholder="Unlimited"
+							value={usageLimit}
+							onChange={(e) => setUsageLimit(e.target.value)}
+						/>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="default-period-usage-limit">
+							Period spend limit ($)
+						</Label>
+						<Input
+							id="default-period-usage-limit"
+							type="number"
+							min={0}
+							step="0.01"
+							placeholder="No period limit"
+							value={periodUsageLimit}
+							onChange={(e) => setPeriodUsageLimit(e.target.value)}
+						/>
+						<div className="flex items-center gap-2">
+							<span className="text-muted-foreground text-sm">per</span>
+							<Input
+								type="number"
+								min={1}
+								className="w-20"
+								value={periodValue}
+								onChange={(e) => setPeriodValue(e.target.value)}
+							/>
+							<Select
+								value={periodUnit}
+								onValueChange={(value) =>
+									setPeriodUnit(value as (typeof PERIOD_UNITS)[number])
+								}
+							>
+								<SelectTrigger className="w-[130px]">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{PERIOD_UNITS.map((unit) => (
+										<SelectItem key={unit} value={unit}>
+											{unit}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					</div>
+				</div>
+				<DialogFooter>
+					<Button variant="outline" onClick={onClose}>
+						Cancel
+					</Button>
+					<Button onClick={handleSave} disabled={updateDefault.isPending}>
+						{updateDefault.isPending ? "Saving..." : "Save defaults"}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+type MemberRole = "owner" | "admin" | "developer";
+interface OrgProject {
+	id: string;
+	name: string;
+}
+
+function ProjectMultiSelect({
+	orgProjects,
+	selected,
+	onChange,
+}: {
+	orgProjects: OrgProject[];
+	selected: string[];
+	onChange: (projectIds: string[]) => void;
+}) {
+	const [open, setOpen] = useState(false);
+
+	if (orgProjects.length === 0) {
+		return (
+			<p className="text-muted-foreground text-sm">
+				This organization has no projects yet. Create a project first.
+			</p>
+		);
+	}
+
+	const selectedProjects = selected
+		.map((id) => orgProjects.find((p) => p.id === id))
+		.filter((p): p is OrgProject => Boolean(p));
+	const available = orgProjects.filter((p) => !selected.includes(p.id));
+
+	return (
+		<div className="space-y-2">
+			{selectedProjects.length > 0 && (
+				<div className="flex flex-wrap gap-1.5">
+					{selectedProjects.map((project) => (
+						<Badge key={project.id} variant="secondary" className="gap-1 pr-1">
+							{project.name}
+							<button
+								type="button"
+								aria-label={`Remove ${project.name}`}
+								className="hover:bg-muted-foreground/20 rounded-sm p-0.5"
+								onClick={() =>
+									onChange(selected.filter((id) => id !== project.id))
+								}
+							>
+								<X className="h-3 w-3" />
+							</button>
+						</Badge>
+					))}
+				</div>
+			)}
+
+			<Popover open={open} onOpenChange={setOpen}>
+				<PopoverTrigger asChild>
+					<Button
+						type="button"
+						variant="outline"
+						role="combobox"
+						aria-expanded={open}
+						disabled={available.length === 0}
+						className="w-full justify-between font-normal"
+					>
+						<span className="text-muted-foreground">
+							{available.length === 0 ? "All projects added" : "Add a project…"}
+						</span>
+						<ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+					</Button>
+				</PopoverTrigger>
+				<PopoverContent
+					className="w-[--radix-popover-trigger-width] p-0"
+					align="start"
+				>
+					<Command>
+						<CommandInput placeholder="Search projects…" />
+						<CommandList>
+							<CommandEmpty>No projects found.</CommandEmpty>
+							<CommandGroup>
+								{available.map((project) => (
+									<CommandItem
+										key={project.id}
+										value={project.name}
+										onSelect={() => {
+											onChange([...selected, project.id]);
+											setOpen(false);
+										}}
+									>
+										{project.name}
+									</CommandItem>
+								))}
+							</CommandGroup>
+						</CommandList>
+					</Command>
+				</PopoverContent>
+			</Popover>
+		</div>
+	);
+}
+
+// Project-scoped developer access is an Enterprise feature: the option is
+// disabled (with a badge) off-plan.
+function DeveloperRoleItem({ isEnterprise }: { isEnterprise: boolean }) {
+	return (
+		<SelectItem value="developer" disabled={!isEnterprise}>
+			<span className="flex w-full items-center gap-2">
+				Developer
+				{!isEnterprise && (
+					<Badge variant="outline" className="text-[10px] font-normal">
+						Enterprise
+					</Badge>
+				)}
+			</span>
+		</SelectItem>
+	);
+}
+
+function EnterpriseDeveloperNote() {
+	return (
+		<p className="text-muted-foreground text-xs">
+			Project-scoped developer access requires the Enterprise plan.{" "}
+			<a href="mailto:contact@llmgateway.io" className="underline">
+				Contact sales
+			</a>
+			.
+		</p>
+	);
+}
+
+function ManageAccessDialog({
+	organizationId,
+	member,
+	orgProjects,
+	isEnterprise,
+	onClose,
+}: {
+	organizationId: string;
+	member: TeamMember;
+	orgProjects: OrgProject[];
+	isEnterprise: boolean;
+	onClose: () => void;
+}) {
+	const updateMember = useUpdateTeamMember(organizationId);
+	const [role, setRole] = useState<MemberRole>(member.role);
+	const [projectIds, setProjectIds] = useState<string[]>(
+		member.projects ? member.projects.map((p) => p.id) : [],
+	);
+
+	const memberName = member.user.name ?? member.user.email;
+
+	const handleSave = async () => {
+		if (role === "developer" && !isEnterprise) {
+			toast({
+				title: "Error",
+				description:
+					"Project-scoped developer access requires the Enterprise plan.",
+				variant: "destructive",
+			});
+			return;
+		}
+		if (role === "developer" && projectIds.length === 0) {
+			toast({
+				title: "Error",
+				description: "Select at least one project for a developer.",
+				variant: "destructive",
+			});
+			return;
+		}
+
+		await updateMember.mutateAsync({
+			params: { path: { organizationId, memberId: member.id } },
+			body: {
+				role,
+				...(role === "developer" ? { projectIds } : {}),
+			},
+		});
+		toast({ title: "Success", description: "Access updated successfully" });
+		onClose();
+	};
+
+	return (
+		<Dialog open onOpenChange={(o) => (o ? undefined : onClose())}>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>Manage access</DialogTitle>
+					<DialogDescription>
+						Set {memberName}'s role. Developers are limited to the projects you
+						grant below; owners and admins can access the whole organization.
+					</DialogDescription>
+				</DialogHeader>
+				<div className="space-y-4 py-4">
+					<div className="space-y-2">
+						<Label htmlFor="access-role">Role</Label>
+						<Select
+							value={role}
+							onValueChange={(value) => setRole(value as MemberRole)}
+						>
+							<SelectTrigger id="access-role">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<DeveloperRoleItem isEnterprise={isEnterprise} />
+								<SelectItem value="admin">Admin</SelectItem>
+								<SelectItem value="owner">Owner</SelectItem>
+							</SelectContent>
+						</Select>
+						{!isEnterprise && <EnterpriseDeveloperNote />}
+					</div>
+
+					{role === "developer" && isEnterprise && (
+						<div className="space-y-2">
+							<Label>Project access</Label>
+							<ProjectMultiSelect
+								orgProjects={orgProjects}
+								selected={projectIds}
+								onChange={setProjectIds}
+							/>
+						</div>
+					)}
+				</div>
+				<DialogFooter>
+					<Button variant="outline" onClick={onClose}>
+						Cancel
+					</Button>
+					<Button onClick={handleSave} disabled={updateMember.isPending}>
+						{updateMember.isPending ? "Saving..." : "Save access"}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+export function TeamClient({ initialData }: { initialData?: TeamMembersData }) {
 	const params = useParams();
 	const organizationId = params.orgId as string;
 	const router = useRouter();
@@ -182,9 +793,8 @@ export function TeamClient() {
 	const api = useApi();
 	const { user } = useUser();
 
-	const { data, isLoading } = useTeamMembers(organizationId);
+	const { data, isLoading } = useTeamMembers(organizationId, initialData);
 	const addMemberMutation = useAddTeamMember(organizationId);
-	const updateMemberMutation = useUpdateTeamMember(organizationId);
 	const removeMemberMutation = useRemoveTeamMember(organizationId);
 
 	const currentUserRole = data?.members.find(
@@ -195,10 +805,23 @@ export function TeamClient() {
 	const showUsage = isEnterprise && isAdmin;
 
 	const [email, setEmail] = useState("");
-	const [role, setRole] = useState<"owner" | "admin" | "developer">(
-		"developer",
-	);
+	const [role, setRole] = useState<MemberRole>("developer");
+	const [newMemberProjectIds, setNewMemberProjectIds] = useState<string[]>([]);
 	const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+	const [budgetMember, setBudgetMember] = useState<TeamMember | null>(null);
+	const [accessMember, setAccessMember] = useState<TeamMember | null>(null);
+	const [defaultLimitsOpen, setDefaultLimitsOpen] = useState(false);
+	const defaultDeveloperBudget = data?.defaultDeveloperBudget ?? null;
+
+	const { data: orgProjectsData } = api.useQuery(
+		"get",
+		"/orgs/{id}/projects",
+		{ params: { path: { id: organizationId } } },
+		{ enabled: !!organizationId && isAdmin },
+	);
+	const orgProjects: OrgProject[] = (orgProjectsData?.projects ?? []).map(
+		(p) => ({ id: p.id, name: p.name }),
+	);
 
 	useEffect(() => {
 		if (!showUsage) {
@@ -232,7 +855,8 @@ export function TeamClient() {
 	);
 
 	const usageColumnCount = 4;
-	const baseColumnCount = 4;
+	// Name, Email, Role, Projects, Limits, Actions
+	const baseColumnCount = 6;
 	const totalColumnCount = showUsage
 		? baseColumnCount + usageColumnCount
 		: baseColumnCount;
@@ -247,13 +871,36 @@ export function TeamClient() {
 			return;
 		}
 
+		if (role === "developer" && !isEnterprise) {
+			toast({
+				title: "Error",
+				description:
+					"Project-scoped developer access requires the Enterprise plan.",
+				variant: "destructive",
+			});
+			return;
+		}
+
+		if (role === "developer" && newMemberProjectIds.length === 0) {
+			toast({
+				title: "Error",
+				description: "Select at least one project for a developer.",
+				variant: "destructive",
+			});
+			return;
+		}
+
 		await addMemberMutation.mutateAsync({
 			params: {
 				path: {
 					organizationId,
 				},
 			},
-			body: { email, role },
+			body: {
+				email,
+				role,
+				...(role === "developer" ? { projectIds: newMemberProjectIds } : {}),
+			},
 		});
 		toast({
 			title: "Success",
@@ -261,28 +908,8 @@ export function TeamClient() {
 		});
 		setEmail("");
 		setRole("developer");
+		setNewMemberProjectIds([]);
 		setIsAddDialogOpen(false);
-	};
-
-	const handleUpdateRole = async (
-		memberId: string,
-		newRole: "owner" | "admin" | "developer",
-	) => {
-		await updateMemberMutation.mutateAsync({
-			params: {
-				path: {
-					organizationId,
-					memberId,
-				},
-			},
-			body: {
-				role: newRole,
-			},
-		});
-		toast({
-			title: "Success",
-			description: "Role updated successfully",
-		});
 	};
 
 	const handleRemoveMember = async (memberId: string, memberName: string) => {
@@ -324,7 +951,17 @@ export function TeamClient() {
 							{showUsage && (
 								<DateRangePicker buildUrl={buildOrgUrl} path="org/team" />
 							)}
-							<Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+							<Dialog
+								open={isAddDialogOpen}
+								onOpenChange={(open) => {
+									setIsAddDialogOpen(open);
+									// Default to a role the org can actually use — developer is
+									// Enterprise-only.
+									if (open) {
+										setRole(isEnterprise ? "developer" : "admin");
+									}
+								}}
+							>
 								<DialogTrigger asChild>
 									<Button disabled={(data?.members.length ?? 0) >= 5}>
 										Add Member
@@ -350,35 +987,55 @@ export function TeamClient() {
 											/>
 										</div>
 										<div className="space-y-2">
-											<Label htmlFor="role">Role</Label>
+											<div className="flex items-center gap-1.5">
+												<Label htmlFor="role">Role</Label>
+												<RolePermissionsHoverCard />
+											</div>
 											<Select
 												value={role}
-												onValueChange={(value) =>
-													setRole(value as "owner" | "admin" | "developer")
-												}
+												onValueChange={(value) => setRole(value as MemberRole)}
 											>
 												<SelectTrigger>
 													<SelectValue placeholder="Select a role" />
 												</SelectTrigger>
 												<SelectContent>
-													<SelectItem value="developer">Developer</SelectItem>
+													<DeveloperRoleItem isEnterprise={isEnterprise} />
 													<SelectItem value="admin">Admin</SelectItem>
 													<SelectItem value="owner">Owner</SelectItem>
 												</SelectContent>
 											</Select>
+											{!isEnterprise && <EnterpriseDeveloperNote />}
 										</div>
+
+										{role === "developer" && isEnterprise && (
+											<div className="space-y-2">
+												<Label>Project access</Label>
+												<p className="text-muted-foreground text-xs">
+													Developers can only see and use the projects you
+													grant.
+												</p>
+												<ProjectMultiSelect
+													orgProjects={orgProjects}
+													selected={newMemberProjectIds}
+													onChange={setNewMemberProjectIds}
+												/>
+											</div>
+										)}
 
 										<Alert>
 											<AlertDescription>
-												Organizations can have up to 5 team members. Contact us
-												at{" "}
-												<a
-													href="mailto:contact@llmgateway.io"
-													className="underline"
-												>
-													contact@llmgateway.io
-												</a>{" "}
-												to unlock more seats.
+												<p>
+													Organizations can have up to 5 team members. Contact
+													us at{" "}
+													<a
+														href="mailto:contact@llmgateway.io"
+														className="underline"
+													>
+														contact@llmgateway.io
+													</a>{" "}
+													to unlock more seats and role-based access control
+													(RBAC).
+												</p>
 											</AlertDescription>
 										</Alert>
 									</div>
@@ -404,6 +1061,52 @@ export function TeamClient() {
 					{showUsage && <ApiKeyAnalyticsCallout href={buildUrl("api-keys")} />}
 
 					{!isEnterprise && <MemberUsageUpsell />}
+
+					{isEnterprise && isAdmin && (
+						<Card>
+							<CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+								<div className="space-y-1">
+									<CardTitle className="text-base">
+										Default developer limits
+									</CardTitle>
+									<CardDescription>
+										Applied to every developer. A developer's own limits
+										override these.
+									</CardDescription>
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setDefaultLimitsOpen(true)}
+								>
+									Edit defaults
+								</Button>
+							</CardHeader>
+							<CardContent>
+								{(() => {
+									const badges = budgetBadges(defaultDeveloperBudget);
+									return badges.length ? (
+										<div className="flex flex-wrap gap-1.5">
+											{badges.map((badge) => (
+												<Badge
+													key={badge}
+													variant="secondary"
+													className="font-normal"
+												>
+													{badge}
+												</Badge>
+											))}
+										</div>
+									) : (
+										<span className="text-muted-foreground text-sm">
+											No default limits set — developers are unlimited unless
+											given a personal budget.
+										</span>
+									);
+								})()}
+							</CardContent>
+						</Card>
+					)}
 
 					<Card>
 						<CardHeader>
@@ -431,6 +1134,8 @@ export function TeamClient() {
 													<RolePermissionsHoverCard />
 												</span>
 											</TableHead>
+											<TableHead>Projects</TableHead>
+											<TableHead>Limits</TableHead>
 											{showUsage && (
 												<>
 													<TableHead className="text-right">Cost</TableHead>
@@ -472,27 +1177,56 @@ export function TeamClient() {
 														</TableCell>
 														<TableCell>{member.user.email}</TableCell>
 														<TableCell>
-															<Select
-																value={member.role}
-																onValueChange={(value) =>
-																	handleUpdateRole(
-																		member.id,
-																		value as "owner" | "admin" | "developer",
-																	)
-																}
-																disabled={updateMemberMutation.isPending}
-															>
-																<SelectTrigger className="w-[130px]">
-																	<SelectValue />
-																</SelectTrigger>
-																<SelectContent>
-																	<SelectItem value="developer">
-																		Developer
-																	</SelectItem>
-																	<SelectItem value="admin">Admin</SelectItem>
-																	<SelectItem value="owner">Owner</SelectItem>
-																</SelectContent>
-															</Select>
+															<Badge variant="secondary" className="capitalize">
+																{member.role}
+															</Badge>
+														</TableCell>
+														<TableCell>
+															{member.projects === null ? (
+																<span className="text-muted-foreground text-sm">
+																	All projects
+																</span>
+															) : member.projects.length === 0 ? (
+																<span className="text-muted-foreground text-sm">
+																	No projects
+																</span>
+															) : (
+																<div className="flex flex-wrap gap-1">
+																	{member.projects.map((project) => (
+																		<Badge
+																			key={project.id}
+																			variant="outline"
+																			className="font-normal"
+																		>
+																			{project.name}
+																		</Badge>
+																	))}
+																</div>
+															)}
+														</TableCell>
+														<TableCell>
+															{(() => {
+																const badges = budgetBadges(
+																	member.effectiveBudget,
+																);
+																return badges.length ? (
+																	<div className="flex flex-wrap gap-1">
+																		{badges.map((badge) => (
+																			<Badge
+																				key={badge}
+																				variant="secondary"
+																				className="font-normal"
+																			>
+																				{badge}
+																			</Badge>
+																		))}
+																	</div>
+																) : (
+																	<span className="text-muted-foreground">
+																		—
+																	</span>
+																);
+															})()}
 														</TableCell>
 														{showUsage && (
 															<>
@@ -511,33 +1245,60 @@ export function TeamClient() {
 															</>
 														)}
 														<TableCell className="text-right">
-															<div className="flex items-center justify-end gap-2">
-																<Button asChild variant="outline" size="sm">
-																	<Link
-																		href={
-																			`${buildOrgUrl(
-																				`org/team/${member.userId}`,
-																			)}?from=${fromStr}&to=${toStr}` as Route
-																		}
-																		prefetch={true}
+															<DropdownMenu>
+																<DropdownMenuTrigger asChild>
+																	<Button
+																		variant="ghost"
+																		size="icon"
+																		className="h-8 w-8"
 																	>
-																		Details
-																	</Link>
-																</Button>
-																<Button
-																	variant="destructive"
-																	size="sm"
-																	onClick={() =>
-																		handleRemoveMember(
-																			member.id,
-																			member.user.name ?? member.user.email,
-																		)
-																	}
-																	disabled={removeMemberMutation.isPending}
-																>
-																	Remove
-																</Button>
-															</div>
+																		<MoreHorizontal className="h-4 w-4" />
+																		<span className="sr-only">Open menu</span>
+																	</Button>
+																</DropdownMenuTrigger>
+																<DropdownMenuContent align="end">
+																	<DropdownMenuLabel>Actions</DropdownMenuLabel>
+																	<DropdownMenuItem asChild>
+																		<Link
+																			href={
+																				`${buildOrgUrl(
+																					`org/team/${member.userId}`,
+																				)}?from=${fromStr}&to=${toStr}` as Route
+																			}
+																			prefetch={true}
+																		>
+																			Details
+																		</Link>
+																	</DropdownMenuItem>
+																	{isAdmin && (
+																		<DropdownMenuItem
+																			onSelect={() => setAccessMember(member)}
+																		>
+																			Manage access
+																		</DropdownMenuItem>
+																	)}
+																	{isAdmin && (
+																		<DropdownMenuItem
+																			onSelect={() => setBudgetMember(member)}
+																		>
+																			Manage budget
+																		</DropdownMenuItem>
+																	)}
+																	<DropdownMenuSeparator />
+																	<DropdownMenuItem
+																		className="text-destructive focus:text-destructive"
+																		disabled={removeMemberMutation.isPending}
+																		onSelect={() =>
+																			handleRemoveMember(
+																				member.id,
+																				member.user.name ?? member.user.email,
+																			)
+																		}
+																	>
+																		Remove
+																	</DropdownMenuItem>
+																</DropdownMenuContent>
+															</DropdownMenu>
 														</TableCell>
 													</TableRow>
 												);
@@ -550,6 +1311,31 @@ export function TeamClient() {
 					</Card>
 				</div>
 			</div>
+			{accessMember && (
+				<ManageAccessDialog
+					key={accessMember.id}
+					organizationId={organizationId}
+					member={accessMember}
+					orgProjects={orgProjects}
+					isEnterprise={isEnterprise}
+					onClose={() => setAccessMember(null)}
+				/>
+			)}
+			{budgetMember && (
+				<ManageBudgetDialog
+					key={budgetMember.id}
+					organizationId={organizationId}
+					member={budgetMember}
+					onClose={() => setBudgetMember(null)}
+				/>
+			)}
+			{defaultLimitsOpen && (
+				<DefaultDeveloperLimitsDialog
+					organizationId={organizationId}
+					budget={defaultDeveloperBudget}
+					onClose={() => setDefaultLimitsOpen(false)}
+				/>
+			)}
 		</div>
 	);
 }

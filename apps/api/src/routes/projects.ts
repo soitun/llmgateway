@@ -2,7 +2,7 @@ import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
-import { getUserOrganizationIds } from "@/utils/authorization.js";
+import { userHasProjectAccess } from "@/utils/authorization.js";
 
 import { logAuditEvent } from "@llmgateway/audit";
 import { cdb, db, eq, tables } from "@llmgateway/db";
@@ -164,15 +164,16 @@ projects.openapi(getProject, async (c) => {
 
 	const { id } = c.req.param();
 
-	const orgIds = await getUserOrganizationIds(user.id);
+	if (!(await userHasProjectAccess(user.id, id))) {
+		throw new HTTPException(404, {
+			message: "Project not found",
+		});
+	}
 
 	const project = await db.query.project.findFirst({
 		where: {
 			id: {
 				eq: id,
-			},
-			organizationId: {
-				in: orgIds,
 			},
 		},
 	});
@@ -239,6 +240,14 @@ projects.openapi(updateProject, async (c) => {
 		});
 	}
 
+	// RBAC: project-scoped "developer" members can only touch projects granted to
+	// them.
+	if (!(await userHasProjectAccess(user.id, project.id))) {
+		throw new HTTPException(404, {
+			message: "Project not found",
+		});
+	}
+
 	const isUpdatingEndUserSettings =
 		endUserEnabled !== undefined ||
 		endUserMarkupPercent !== undefined ||
@@ -248,6 +257,16 @@ projects.openapi(updateProject, async (c) => {
 	);
 	const isAdminOrOwner =
 		projectUserOrg?.role === "owner" || projectUserOrg?.role === "admin";
+
+	// Project settings are admin-only; project-scoped "developer" members cannot
+	// edit projects.
+	if (!isAdminOrOwner) {
+		throw new HTTPException(403, {
+			message:
+				"Only organization owners and admins can update project settings",
+		});
+	}
+
 	if (isUpdatingEndUserSettings && !isAdminOrOwner) {
 		throw new HTTPException(403, {
 			message:
@@ -521,18 +540,13 @@ export async function createProjectForOrg(
 			});
 		}
 
-		// Setting a non-default billing mode (e.g. BYOK "api-keys") is privileged,
-		// mirroring the PATCH guard: a member must not be able to create a project
-		// in a privileged mode to sidestep the update-time role check.
+		// Project management is admin-only; project-scoped "developer" members
+		// cannot create projects.
 		const isAdminOrOwner =
 			userOrganization.role === "owner" || userOrganization.role === "admin";
-		if (
-			input.mode !== undefined &&
-			input.mode !== DEFAULT_PROJECT_MODE &&
-			!isAdminOrOwner
-		) {
+		if (!isAdminOrOwner) {
 			throw new HTTPException(403, {
-				message: "Only organization owners and admins can set the project mode",
+				message: "Only organization owners and admins can create projects",
 			});
 		}
 	}

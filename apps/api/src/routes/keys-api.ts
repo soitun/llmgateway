@@ -901,6 +901,46 @@ export async function createApiKeyForProject(
 		});
 	}
 
+	// Enforce the active-key cap. The creator's own per-member cap wins; for
+	// developers with no explicit cap the org-wide default developer cap applies.
+	const creatorMembership = await db.query.userOrganization.findFirst({
+		where: {
+			userId: { eq: userId },
+			organizationId: { eq: project.organization.id },
+		},
+		columns: { role: true, maxApiKeys: true },
+	});
+
+	const effectiveMaxApiKeys =
+		creatorMembership?.maxApiKeys ??
+		(creatorMembership?.role === "developer"
+			? project.organization.defaultDeveloperMaxApiKeys
+			: null);
+
+	if (typeof effectiveMaxApiKeys === "number") {
+		const orgProjects = await db.query.project.findMany({
+			where: { organizationId: { eq: project.organization.id } },
+			columns: { id: true },
+		});
+		const orgProjectIds = orgProjects.map((p) => p.id);
+
+		const memberActiveKeys = await db.query.apiKey.findMany({
+			where: {
+				createdBy: { eq: userId },
+				status: { eq: "active" },
+				keyType: { eq: "user" },
+				projectId: { in: orgProjectIds },
+			},
+			columns: { id: true },
+		});
+
+		if (memberActiveKeys.length >= effectiveMaxApiKeys) {
+			throw new HTTPException(400, {
+				message: `You have reached your limit of ${effectiveMaxApiKeys} active API keys set by an organization admin.`,
+			});
+		}
+	}
+
 	const prefix =
 		process.env.NODE_ENV === "development" ? `llmgdev_` : "llmgtwy_";
 	const token = prefix + shortid(40);
@@ -1046,6 +1086,8 @@ keysApi.openapi(list, async (c) => {
 
 	// Determine user's role for the relevant organization
 	let userRole: "owner" | "admin" | "developer" = "developer";
+	// Project-scoped "developer" members may only ever see their OWN keys.
+	let developerScoped = false;
 	if (projectId) {
 		const project = await db.query.project.findFirst({
 			where: {
@@ -1061,12 +1103,14 @@ keysApi.openapi(list, async (c) => {
 			);
 			if (userOrg) {
 				userRole = userOrg.role as "owner" | "admin" | "developer";
+				developerScoped = userRole === "developer";
 			}
 		}
 	}
 
-	// All users can see all keys, but can still filter to "mine"
-	const shouldFilterByCreator = filter === "mine";
+	// Owners/admins see all keys (with an optional "mine" filter); developers are
+	// always restricted to the keys they created.
+	const shouldFilterByCreator = filter === "mine" || developerScoped;
 
 	// Get API keys for the specified project or all accessible projects
 	const apiKeys = await db.query.apiKey.findMany({
