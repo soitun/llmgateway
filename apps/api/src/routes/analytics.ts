@@ -283,6 +283,21 @@ const breakdownEntrySchema = z.object({
 	totalTokens: z.number(),
 });
 
+const memberActivityModelSchema = z.object({
+	id: z.string(),
+	provider: z.string(),
+	requestCount: z.number(),
+	inputTokens: z.number(),
+	outputTokens: z.number(),
+	totalTokens: z.number(),
+	cost: z.number(),
+});
+
+const memberActivityRowSchema = z.object({
+	date: z.string(),
+	modelBreakdown: z.array(memberActivityModelSchema),
+});
+
 const memberDetailSchema = z.object({
 	member: z.object({
 		userId: z.string(),
@@ -303,6 +318,7 @@ const memberDetailSchema = z.object({
 	topModels: z.array(breakdownEntrySchema),
 	topProviders: z.array(breakdownEntrySchema),
 	costByModel: z.array(breakdownEntrySchema),
+	activity: z.array(memberActivityRowSchema),
 });
 
 const getMemberDetail = createRoute({
@@ -354,6 +370,20 @@ analytics.openapi(getMemberDetail, async (c) => {
 	const { startDate, endDate } = resolveDateRange(from, to);
 	const projectIds = await getOrgProjectIds(organizationId);
 
+	const fromStr = from ?? startDate.toISOString().slice(0, 10);
+	const toStr = to ?? endDate.toISOString().slice(0, 10);
+
+	if (rangeDaysInclusive(fromStr, toStr) > MAX_ORG_ACTIVITY_RANGE_DAYS) {
+		throw new HTTPException(400, {
+			message: `Date range too large (max ${MAX_ORG_ACTIVITY_RANGE_DAYS} days)`,
+		});
+	}
+
+	const emptyActivity = eachDay(fromStr, toStr).map((date) => ({
+		date,
+		modelBreakdown: [],
+	}));
+
 	const member = {
 		userId: membership.userId,
 		name: membership.user?.name ?? null,
@@ -379,6 +409,7 @@ analytics.openapi(getMemberDetail, async (c) => {
 			topModels: [],
 			topProviders: [],
 			costByModel: [],
+			activity: emptyActivity,
 		});
 	}
 
@@ -400,6 +431,7 @@ analytics.openapi(getMemberDetail, async (c) => {
 			topModels: [],
 			topProviders: [],
 			costByModel: [],
+			activity: emptyActivity,
 		});
 	}
 
@@ -510,12 +542,77 @@ analytics.openapi(getMemberDetail, async (c) => {
 
 	const topModels = costByModel.slice(0, 5);
 
+	const activityRows = await db
+		.select({
+			date: sql<string>`DATE(${apiKeyHourlyModelStats.hourTimestamp})`.as(
+				"date",
+			),
+			usedModel: apiKeyHourlyModelStats.usedModel,
+			usedProvider: apiKeyHourlyModelStats.usedProvider,
+			cost: sql<number>`COALESCE(SUM(${apiKeyHourlyModelStats.cost}), 0)`.as(
+				"cost",
+			),
+			requestCount:
+				sql<number>`COALESCE(SUM(${apiKeyHourlyModelStats.requestCount}), 0)`.as(
+					"request_count",
+				),
+			inputTokens:
+				sql<number>`COALESCE(SUM(CAST(${apiKeyHourlyModelStats.inputTokens} AS NUMERIC)), 0)`.as(
+					"input_tokens",
+				),
+			outputTokens:
+				sql<number>`COALESCE(SUM(CAST(${apiKeyHourlyModelStats.outputTokens} AS NUMERIC)), 0)`.as(
+					"output_tokens",
+				),
+			totalTokens:
+				sql<number>`COALESCE(SUM(CAST(${apiKeyHourlyModelStats.totalTokens} AS NUMERIC)), 0)`.as(
+					"total_tokens",
+				),
+		})
+		.from(apiKeyHourlyModelStats)
+		.where(
+			and(
+				inArray(apiKeyHourlyModelStats.apiKeyId, keyIds),
+				gte(apiKeyHourlyModelStats.hourTimestamp, startDate),
+				lte(apiKeyHourlyModelStats.hourTimestamp, endDate),
+			),
+		)
+		.groupBy(
+			sql`1, ${apiKeyHourlyModelStats.usedModel}, ${apiKeyHourlyModelStats.usedProvider}`,
+		)
+		.orderBy(sql`1 ASC`);
+
+	const breakdownByDate = new Map<
+		string,
+		z.infer<typeof memberActivityModelSchema>[]
+	>();
+	for (const row of activityRows) {
+		const date = String(row.date).slice(0, 10);
+		const list = breakdownByDate.get(date) ?? [];
+		list.push({
+			id: row.usedModel || "unknown",
+			provider: row.usedProvider || "unknown",
+			cost: Number(row.cost ?? 0),
+			requestCount: Number(row.requestCount ?? 0),
+			inputTokens: Number(row.inputTokens ?? 0),
+			outputTokens: Number(row.outputTokens ?? 0),
+			totalTokens: Number(row.totalTokens ?? 0),
+		});
+		breakdownByDate.set(date, list);
+	}
+
+	const activity = eachDay(fromStr, toStr).map((date) => ({
+		date,
+		modelBreakdown: breakdownByDate.get(date) ?? [],
+	}));
+
 	return c.json({
 		member,
 		summary,
 		topModels,
 		topProviders,
 		costByModel,
+		activity,
 	});
 });
 

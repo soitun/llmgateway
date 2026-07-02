@@ -8,6 +8,7 @@ import { useEffect } from "react";
 
 import { currencyFormatter } from "@/components/analytics/chart-helpers";
 import { CostByModelCard } from "@/components/analytics/cost-by-model-card";
+import { CostByModelOverTimeCard } from "@/components/analytics/cost-by-model-over-time-card";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { useDashboardNavigation } from "@/hooks/useDashboardNavigation";
 import { useTeamMembers } from "@/hooks/useTeam";
@@ -92,22 +93,7 @@ export function MemberDetailClient() {
 			? (summary.errorCount / summary.requestCount) * 100
 			: 0;
 
-	const activity: ActivityRow[] = data
-		? [
-				{
-					date: fromStr,
-					modelBreakdown: data.costByModel.map((c) => ({
-						id: c.key,
-						provider: "",
-						requestCount: c.requestCount,
-						inputTokens: 0,
-						outputTokens: 0,
-						totalTokens: c.totalTokens,
-						cost: c.cost,
-					})),
-				},
-			]
-		: [];
+	const activity = (data?.activity ?? []) as ActivityRow[];
 
 	const stats = [
 		{
@@ -246,6 +232,12 @@ export function MemberDetailClient() {
 								</Card>
 							))}
 						</div>
+
+						<CostByModelOverTimeCard
+							activity={activity}
+							loading={isLoading}
+							description={`Usage over time by model for ${memberName}`}
+						/>
 
 						<CostByModelCard
 							activity={activity}
