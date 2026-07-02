@@ -511,19 +511,33 @@ export function TeamClient() {
 															</>
 														)}
 														<TableCell className="text-right">
-															<Button
-																variant="destructive"
-																size="sm"
-																onClick={() =>
-																	handleRemoveMember(
-																		member.id,
-																		member.user.name ?? member.user.email,
-																	)
-																}
-																disabled={removeMemberMutation.isPending}
-															>
-																Remove
-															</Button>
+															<div className="flex items-center justify-end gap-2">
+																<Button asChild variant="outline" size="sm">
+																	<Link
+																		href={
+																			`${buildOrgUrl(
+																				`org/team/${member.userId}`,
+																			)}?from=${fromStr}&to=${toStr}` as Route
+																		}
+																		prefetch={true}
+																	>
+																		Details
+																	</Link>
+																</Button>
+																<Button
+																	variant="destructive"
+																	size="sm"
+																	onClick={() =>
+																		handleRemoveMember(
+																			member.id,
+																			member.user.name ?? member.user.email,
+																		)
+																	}
+																	disabled={removeMemberMutation.isPending}
+																>
+																	Remove
+																</Button>
+															</div>
 														</TableCell>
 													</TableRow>
 												);
