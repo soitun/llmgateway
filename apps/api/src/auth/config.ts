@@ -1070,6 +1070,24 @@ The LLM Gateway Team`.trim();
 						});
 					}
 
+					// Enterprise SSO logins arrive on the plugin's `/sso/...` callback
+					// paths. The IdP (whose domain the org controls) has authenticated
+					// the user, so their email is verified — otherwise they'd be stuck
+					// behind the "verify your email" banner despite never using a
+					// password. The plugin defaults `emailVerified` to false because
+					// Entra/Okta don't send an email-verified claim.
+					if (ctx.path.startsWith("/sso/") && !newSession.user.emailVerified) {
+						await db
+							.update(tables.user)
+							.set({ emailVerified: true })
+							.where(eq(tables.user.id, userId));
+						newSession.user.emailVerified = true;
+
+						logger.info("Automatically verified email for SSO user", {
+							userId,
+						});
+					}
+
 					// Check if this is a social login by querying the account table
 					// For OAuth signups, we need to send notifications and create Resend contacts
 					if (isHosted) {
