@@ -12,6 +12,7 @@ import { and, db, eq, shortid, tables } from "@llmgateway/db";
 import { getApiKeyFingerprint } from "@llmgateway/shared/api-key-hash";
 
 import type { ServerTypes } from "@/vars.js";
+import type { SSOOptions, SSOPlugin } from "@better-auth/sso";
 
 export const sso = new OpenAPIHono<ServerTypes>();
 
@@ -62,45 +63,26 @@ function rethrowAsHttpException(error: unknown): never {
 	throw error;
 }
 
-// `apiAuth` is annotated with the generic `instrumentBetterAuth` return type,
-// which erases the sso plugin's endpoints. Narrow to just the method we call.
-interface SamlMapping {
-	id?: string;
-	email?: string;
-	name?: string;
-	firstName?: string;
-	lastName?: string;
-}
-
-// The plugin builds the SP from these fields; every one is optional and we let
-// it fall back to `issuer` (SP entity id) and `callbackUrl` (ACS). The object
-// itself is required, though — the register schema types it non-optional.
-interface SamlSpMetadata {
-	metadata?: string;
-	entityID?: string;
-	binding?: string;
-}
-
-type RegisterSSOProvider = (args: {
-	body: {
-		providerId: string;
-		issuer: string;
-		domain: string;
-		samlConfig: {
-			entryPoint: string;
-			cert: string;
-			callbackUrl: string;
-			spMetadata: SamlSpMetadata;
-			wantAssertionsSigned?: boolean;
-			identifierFormat?: string;
-			mapping?: SamlMapping;
-		};
-	};
-	headers: Headers;
-}) => Promise<unknown>;
+// `apiAuth` is exported with the generic `instrumentBetterAuth` return type
+// (needed to keep the emitted .d.ts portable), which erases the sso plugin's
+// endpoint signatures. Rather than hand-maintain the request shape, derive it
+// from the plugin's own register endpoint so it tracks the installed
+// @better-auth/sso version — including the required `spMetadata` object and the
+// required `mapping.id`, both of which are looser in the plugin's public
+// `SAMLConfig`/`SAMLMapping` types than in the endpoint's actual schema.
+type RegisterEndpoint =
+	SSOPlugin<SSOOptions>["endpoints"]["registerSSOProvider"];
+type RegisterBody = NonNullable<Parameters<RegisterEndpoint>[0]>["body"];
+type SamlConfig = NonNullable<RegisterBody["samlConfig"]>;
+type SamlMapping = NonNullable<SamlConfig["mapping"]>;
 
 const registerSSOProvider = (
-	apiAuth.api as unknown as { registerSSOProvider: RegisterSSOProvider }
+	apiAuth.api as unknown as {
+		registerSSOProvider: (args: {
+			body: RegisterBody;
+			headers: Headers;
+		}) => Promise<unknown>;
+	}
 ).registerSSOProvider;
 
 // Microsoft Entra ID (Azure AD) sends the user's email/name as SAML claim
