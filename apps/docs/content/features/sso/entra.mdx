@@ -216,6 +216,16 @@ Assigned users are created in LLM Gateway and added to the organization (default
 
 On the **SSO** page, add mappings such as `Acme Admins → admin`. When Entra pushes group membership over SCIM, each member gets the **highest** mapped role among their groups (default `developer`). Owners are never auto-demoted, so you can't accidentally lock yourself out of the owner role.
 
+## Default project access (optional)
+
+Provisioned members join as **developers**, who only see the projects they're granted (owners/admins always see every project). Use the **Default project access** card on the **SSO** page to choose which projects newly provisioned SSO/SCIM developers get by default. If you leave it unconfigured, new members get your organization's first (default) project so they can see something out of the box; select an empty set to instead grant nothing and manage project access manually per member.
+
+<Callout type="info">
+	Default project access applies only to members provisioned **after** you set
+	it — it doesn't retroactively change existing members' project grants. Adjust
+	an existing member's projects from the **Team** page.
+</Callout>
+
 ## Test the login
 
 Log out → login page → **Sign in with SSO** → enter a work email (`someone@acme.com`). LLM Gateway resolves the connection by email domain, redirects to Entra, and on return the (SCIM-provisioned) user is signed in and lands in the enterprise organization.

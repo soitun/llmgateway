@@ -6,6 +6,7 @@ import { z } from "zod";
 import { apiAuth } from "@/auth/config.js";
 import { getApiBaseUrl } from "@/lib/api-url.js";
 import { maskToken } from "@/lib/maskToken.js";
+import { getOrgProjectsOldestFirst } from "@/lib/sso-default-projects.js";
 
 import { logAuditEvent } from "@llmgateway/audit";
 import { and, db, eq, shortid, tables } from "@llmgateway/db";
@@ -676,6 +677,126 @@ sso.openapi(removeRoleMapping, async (c) => {
 	});
 
 	return c.json({ message: "Role mapping deleted successfully" });
+});
+
+const orgProjectSchema = z.object({ id: z.string(), name: z.string() });
+
+const defaultProjectsResponseSchema = z.object({
+	projects: z.array(orgProjectSchema),
+	selectedProjectIds: z.array(z.string()),
+	fallbackProjectId: z.string().nullable(),
+});
+
+const listDefaultProjects = createRoute({
+	method: "get",
+	path: "/default-projects",
+	request: { query: listQuerySchema },
+	responses: {
+		200: {
+			content: {
+				"application/json": { schema: defaultProjectsResponseSchema },
+			},
+			description:
+				"Projects granted to SSO-provisioned members by default, plus the org's projects to choose from.",
+		},
+	},
+});
+
+sso.openapi(listDefaultProjects, async (c) => {
+	const user = c.get("user");
+	if (!user) {
+		throw new HTTPException(401, { message: "Unauthorized" });
+	}
+
+	const { organizationId } = c.req.valid("query");
+
+	await assertEnterpriseOrgAccess(user.id, organizationId);
+
+	const liveProjects = await getOrgProjectsOldestFirst(organizationId);
+	const liveIds = new Set(liveProjects.map((p) => p.id));
+	const configured = await db.query.ssoDefaultProject.findMany({
+		where: { organizationId: { eq: organizationId } },
+		columns: { projectId: true },
+	});
+
+	return c.json({
+		projects: liveProjects.map((p) => ({ id: p.id, name: p.name })),
+		selectedProjectIds: configured
+			.map((row) => row.projectId)
+			.filter((id) => liveIds.has(id)),
+		fallbackProjectId: liveProjects[0]?.id ?? null,
+	});
+});
+
+const setDefaultProjects = createRoute({
+	method: "put",
+	path: "/default-projects",
+	request: {
+		body: {
+			content: {
+				"application/json": {
+					schema: z.object({
+						organizationId: z.string().trim().min(1),
+						projectIds: z.array(z.string()),
+					}),
+				},
+			},
+		},
+	},
+	responses: {
+		200: {
+			content: {
+				"application/json": { schema: defaultProjectsResponseSchema },
+			},
+			description: "Updated default project grants.",
+		},
+	},
+});
+
+sso.openapi(setDefaultProjects, async (c) => {
+	const user = c.get("user");
+	if (!user) {
+		throw new HTTPException(401, { message: "Unauthorized" });
+	}
+
+	const { organizationId, projectIds } = c.req.valid("json");
+
+	await assertEnterpriseOrgAccess(user.id, organizationId);
+
+	const liveProjects = await getOrgProjectsOldestFirst(organizationId);
+	const liveIds = new Set(liveProjects.map((p) => p.id));
+	const requested = Array.from(new Set(projectIds));
+	const invalid = requested.filter((id) => !liveIds.has(id));
+	if (invalid.length > 0) {
+		throw new HTTPException(400, {
+			message: "One or more projects do not belong to this organization",
+		});
+	}
+
+	// Replace the org's default set with exactly the requested projects.
+	await db
+		.delete(tables.ssoDefaultProject)
+		.where(eq(tables.ssoDefaultProject.organizationId, organizationId));
+	if (requested.length > 0) {
+		await db
+			.insert(tables.ssoDefaultProject)
+			.values(requested.map((projectId) => ({ organizationId, projectId })));
+	}
+
+	await logAuditEvent({
+		organizationId,
+		userId: user.id,
+		action: "sso_default_projects.update",
+		resourceType: "sso_default_project",
+		resourceId: organizationId,
+		metadata: { resourceName: `${requested.length} project(s)` },
+	});
+
+	return c.json({
+		projects: liveProjects.map((p) => ({ id: p.id, name: p.name })),
+		selectedProjectIds: requested,
+		fallbackProjectId: liveProjects[0]?.id ?? null,
+	});
 });
 
 const scimStatusSchema = z.object({

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 
 import { getApiBaseUrl } from "@/lib/api-url.js";
+import { resolveDefaultProjectIds } from "@/lib/sso-default-projects.js";
 
 import { and, db, eq, tables } from "@llmgateway/db";
 import { logger } from "@llmgateway/logger";
@@ -369,18 +370,41 @@ scim.post("/Users", async (c) => {
 		});
 	}
 
-	await db.insert(tables.userOrganization).values({
-		userId: user.id,
-		organizationId: orgId,
-		role: "developer",
-		scimExternalId: payload.externalId ?? null,
-	});
+	const [membership] = await db
+		.insert(tables.userOrganization)
+		.values({
+			userId: user.id,
+			organizationId: orgId,
+			role: "developer",
+			scimExternalId: payload.externalId ?? null,
+		})
+		.returning({ id: tables.userOrganization.id });
+
+	await grantDefaultProjects(membership.id, orgId);
 
 	// Apply any role mapping in case the user is already referenced by a group.
 	await recomputeUserRole(user.id, orgId);
 
 	return scimJson(toScimUser(user, true, payload.externalId), 201);
 });
+
+// Grant a freshly-created membership the org's default project access. Owners/
+// admins have implicit all-project access, so these rows only take effect for
+// `developer` members (and are harmless otherwise). Called only on membership
+// creation so later manual grant edits are never overwritten.
+async function grantDefaultProjects(
+	userOrganizationId: string,
+	organizationId: string,
+) {
+	const projectIds = await resolveDefaultProjectIds(organizationId);
+	if (projectIds.length === 0) {
+		return;
+	}
+	await db
+		.insert(tables.userProject)
+		.values(projectIds.map((projectId) => ({ userOrganizationId, projectId })))
+		.onConflictDoNothing();
+}
 
 async function removeMembership(userId: string, organizationId: string) {
 	await db
@@ -400,12 +424,16 @@ async function ensureMembership(
 ) {
 	const existing = await getMembership(userId, organizationId);
 	if (!existing) {
-		await db.insert(tables.userOrganization).values({
-			userId,
-			organizationId,
-			role: "developer",
-			scimExternalId: externalId ?? null,
-		});
+		const [membership] = await db
+			.insert(tables.userOrganization)
+			.values({
+				userId,
+				organizationId,
+				role: "developer",
+				scimExternalId: externalId ?? null,
+			})
+			.returning({ id: tables.userOrganization.id });
+		await grantDefaultProjects(membership.id, organizationId);
 	} else if (
 		externalId !== undefined &&
 		existing.scimExternalId !== externalId

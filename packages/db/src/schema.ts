@@ -1817,6 +1817,37 @@ export const ssoRoleMapping = pgTable(
 	],
 );
 
+// Default project grants for `developer` members provisioned via SSO/SCIM.
+// Owners/admins already have implicit access to every project, so this only
+// affects developer provisioning: when a new SSO/SCIM member is created they
+// receive a `userProject` grant for each project listed here. When an org has
+// no rows, provisioning falls back to the org's first (default) project so SSO
+// members can see something out of the box.
+export const ssoDefaultProject = pgTable(
+	"sso_default_project",
+	{
+		id: text().primaryKey().$defaultFn(shortid),
+		createdAt: timestamp().notNull().defaultNow(),
+		updatedAt: timestamp()
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+		organizationId: text()
+			.notNull()
+			.references(() => organization.id, { onDelete: "cascade" }),
+		projectId: text()
+			.notNull()
+			.references(() => project.id, { onDelete: "cascade" }),
+	},
+	(table) => [
+		uniqueIndex("sso_default_project_org_project_unique").on(
+			table.organizationId,
+			table.projectId,
+		),
+		index("sso_default_project_organization_id_idx").on(table.organizationId),
+	],
+);
+
 export const paymentMethod = pgTable(
 	"payment_method",
 	{
@@ -2645,6 +2676,7 @@ export const auditLogActions = [
 	"sso_provider.delete",
 	"sso_role_mapping.create",
 	"sso_role_mapping.delete",
+	"sso_default_projects.update",
 	// SCIM
 	"scim_token.create",
 	"scim_token.revoke",
@@ -2666,6 +2698,7 @@ export const auditLogResourceTypes = [
 	"chat_plan",
 	"sso_provider",
 	"sso_role_mapping",
+	"sso_default_project",
 	"scim_token",
 ] as const;
 

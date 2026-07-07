@@ -14,6 +14,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/lib/components/card";
+import { Checkbox } from "@/lib/components/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -137,6 +138,10 @@ export function SsoClient() {
 	const [role, setRole] = useState<"owner" | "admin" | "developer">(
 		"developer",
 	);
+	// Local edit buffer for the default-projects checklist. `null` = untouched, so
+	// the displayed selection derives from the server value (or the fallback
+	// project). Reset to `null` after a successful save to re-sync with the server.
+	const [projectDraft, setProjectDraft] = useState<string[] | null>(null);
 
 	// Slug the admin pastes into the IdP (part of the SP URLs). Suggested as the
 	// recommended `<org-slug>-<provider>` format until the admin overrides it; must
@@ -175,6 +180,13 @@ export function SsoClient() {
 		{ enabled: !!organizationId && isEnterprise },
 	);
 
+	const defaultProjectsQuery = api.useQuery(
+		"get",
+		"/sso/default-projects",
+		{ params: { query: { organizationId } } },
+		{ enabled: !!organizationId && isEnterprise },
+	);
+
 	const registerMutation = api.useMutation("post", "/sso/providers");
 	const deleteMutation = api.useMutation(
 		"delete",
@@ -188,6 +200,7 @@ export function SsoClient() {
 	const revokeScim = api.useMutation("delete", "/sso/scim");
 	const createMapping = api.useMutation("post", "/sso/role-mappings");
 	const deleteMapping = api.useMutation("delete", "/sso/role-mappings/{id}");
+	const saveDefaultProjects = api.useMutation("put", "/sso/default-projects");
 
 	function invalidateProviders() {
 		void queryClient.invalidateQueries({
@@ -211,6 +224,56 @@ export function SsoClient() {
 				params: { query: { organizationId } },
 			}).queryKey,
 		});
+	}
+
+	function invalidateDefaultProjects() {
+		void queryClient.invalidateQueries({
+			queryKey: api.queryOptions("get", "/sso/default-projects", {
+				params: { query: { organizationId } },
+			}).queryKey,
+		});
+	}
+
+	// When nothing is configured yet, the checklist pre-selects the org's fallback
+	// (oldest) project — matching what provisioning would grant — so saving as-is
+	// is a no-op change rather than a surprise.
+	const defaultProjectsData = defaultProjectsQuery.data;
+	const savedProjectIds = defaultProjectsData?.selectedProjectIds ?? [];
+	const initialProjectIds =
+		savedProjectIds.length > 0
+			? savedProjectIds
+			: defaultProjectsData?.fallbackProjectId
+				? [defaultProjectsData.fallbackProjectId]
+				: [];
+	const selectedProjectIds = projectDraft ?? initialProjectIds;
+	const projectSelectionDirty = projectDraft !== null;
+
+	function toggleDefaultProject(projectId: string, checked: boolean) {
+		const base = projectDraft ?? initialProjectIds;
+		setProjectDraft(
+			checked
+				? Array.from(new Set([...base, projectId]))
+				: base.filter((id) => id !== projectId),
+		);
+	}
+
+	async function handleSaveDefaultProjects() {
+		try {
+			await saveDefaultProjects.mutateAsync({
+				body: { organizationId, projectIds: selectedProjectIds },
+			});
+			toast({ title: "Default project access saved" });
+			setProjectDraft(null);
+			invalidateDefaultProjects();
+		} catch (error) {
+			toast({
+				title:
+					error instanceof Error
+						? error.message
+						: "Failed to save default project access",
+				variant: "destructive",
+			});
+		}
 	}
 
 	async function handleToggleEnforced(providerId: string, enforced: boolean) {
@@ -710,6 +773,60 @@ export function SsoClient() {
 							Add mapping
 						</Button>
 					</form>
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle>Default project access</CardTitle>
+					<CardDescription>
+						Projects that members provisioned via SSO/SCIM get access to when
+						they first sign in. Only affects the <strong>developer</strong> role
+						— owners and admins can always access every project. Existing
+						members are unchanged; this applies to newly provisioned users.
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-4">
+					{defaultProjectsData && defaultProjectsData.projects.length === 0 ? (
+						<p className="text-sm text-muted-foreground">
+							This organization has no projects yet. Create a project first,
+							then choose which ones SSO members get by default.
+						</p>
+					) : (
+						<>
+							<div className="divide-y rounded-lg border">
+								{(defaultProjectsData?.projects ?? []).map((project) => (
+									<label
+										key={project.id}
+										className="flex cursor-pointer items-center gap-3 p-3 text-sm"
+									>
+										<Checkbox
+											checked={selectedProjectIds.includes(project.id)}
+											onCheckedChange={(checked) =>
+												toggleDefaultProject(project.id, checked === true)
+											}
+										/>
+										<span className="font-medium">{project.name}</span>
+									</label>
+								))}
+							</div>
+							{selectedProjectIds.length === 0 && (
+								<p className="text-sm text-muted-foreground">
+									With no projects selected, newly provisioned SSO members
+									(developers) start with no project access and must be granted
+									access manually.
+								</p>
+							)}
+							<Button
+								onClick={handleSaveDefaultProjects}
+								disabled={
+									saveDefaultProjects.isPending || !projectSelectionDirty
+								}
+							>
+								{saveDefaultProjects.isPending ? "Saving..." : "Save"}
+							</Button>
+						</>
+					)}
 				</CardContent>
 			</Card>
 
