@@ -265,6 +265,9 @@ export function SsoClient() {
 
 	async function handleRegister(e: React.FormEvent) {
 		e.preventDefault();
+		if (!providerType) {
+			return;
+		}
 		try {
 			await registerMutation.mutateAsync({
 				body: {

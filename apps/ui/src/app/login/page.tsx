@@ -204,10 +204,11 @@ export default function Login() {
 		const email = form.getValues("email");
 		const parsed = z.string().email().safeParse(email);
 		if (!parsed.success) {
-			form.setError("email", {
-				message: "Enter your work email to sign in with SSO",
-			});
-			form.setFocus("email");
+			// Send the user to the dedicated SSO page, which asks only for a work
+			// email — clearer than the full email+password form when SSO only needs
+			// the email. Carry over whatever they've already typed.
+			const query = email ? `?email=${encodeURIComponent(email)}` : "";
+			router.push(`/sso${query}` as Route);
 			return;
 		}
 
