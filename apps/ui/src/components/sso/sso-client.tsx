@@ -543,7 +543,11 @@ export function SsoClient() {
 									</Label>
 									<Input
 										id="sso-entrypoint"
-										placeholder="https://acme.okta.com/app/.../sso/saml"
+										placeholder={
+											providerType === "entra"
+												? "https://login.microsoftonline.com/<uuid>/saml2"
+												: "https://acme.okta.com/app/.../sso/saml"
+										}
 										value={entryPoint}
 										onChange={(e) => setEntryPoint(e.target.value)}
 										required
