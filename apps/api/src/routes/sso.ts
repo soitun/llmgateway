@@ -72,6 +72,15 @@ interface SamlMapping {
 	lastName?: string;
 }
 
+// The plugin builds the SP from these fields; every one is optional and we let
+// it fall back to `issuer` (SP entity id) and `callbackUrl` (ACS). The object
+// itself is required, though — the register schema types it non-optional.
+interface SamlSpMetadata {
+	metadata?: string;
+	entityID?: string;
+	binding?: string;
+}
+
 type RegisterSSOProvider = (args: {
 	body: {
 		providerId: string;
@@ -81,6 +90,7 @@ type RegisterSSOProvider = (args: {
 			entryPoint: string;
 			cert: string;
 			callbackUrl: string;
+			spMetadata: SamlSpMetadata;
 			wantAssertionsSigned?: boolean;
 			identifierFormat?: string;
 			mapping?: SamlMapping;
@@ -97,7 +107,11 @@ const registerSSOProvider = (
 // attributes (not as the NameID, which defaults to an opaque persistent id), so
 // we map them explicitly. Okta/generic IdPs work with the default mapping (the
 // plugin falls back to the NameID for email), so we leave those unmapped.
+// `id` is a required field in the plugin's mapping schema. Use Entra's
+// immutable object id (present in the default claim set) as the stable account
+// identifier rather than the NameID, which can change with the user's UPN.
 const ENTRA_SAML_MAPPING: SamlMapping = {
+	id: "http://schemas.microsoft.com/identity/claims/objectidentifier",
 	email: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
 	name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
 	firstName: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
@@ -226,6 +240,9 @@ sso.openapi(register, async (c) => {
 					entryPoint,
 					cert,
 					callbackUrl: acsUrl,
+					// Required object; empty lets the plugin derive the SP entity id
+					// from `issuer` (our metadata URL) and the ACS from `callbackUrl`.
+					spMetadata: {},
 					wantAssertionsSigned: true,
 					// Entra returns its default NameID; don't constrain it (email
 					// comes from the mapped claim). Okta/generic use email NameID.
