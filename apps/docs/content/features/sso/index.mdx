@@ -49,6 +49,16 @@ With `API_URL = https://internal.llmgateway.io` and a connection slug of `acme-e
 | Reply URL (ACS)                   | `https://internal.llmgateway.io/auth/sso/saml2/sp/acs/acme-entra`                 |
 | SCIM Tenant URL                   | `https://internal.llmgateway.io/scim/v2`                                          |
 
+## SCIM authentication
+
+SCIM uses a **static bearer token**, not OAuth. You generate the token once on the **SSO → Directory sync (SCIM)** card, and your IdP sends it as `Authorization: Bearer <token>` on every request. In your IdP's provisioning config, that means:
+
+- **Authentication method:** the **bearer token** option — Entra labels it **"Long-lived bearer token"** / **"Secret token"**; Okta calls it an **API token**. Do **not** choose an OAuth 2.0 authorization-code flow — LLM Gateway does not implement one, and the connection test will fail.
+- **Tenant / base URL:** the SCIM Tenant URL above (`…/scim/v2`).
+- **Secret token:** the value from the SCIM card (shown once; rotate to reissue).
+
+The token is scoped to a single organization, so every user and group your IdP pushes lands in that org.
+
 ## Provider guides
 
 - [Microsoft Entra ID](/features/sso/entra) — set up SAML SSO and SCIM provisioning with Entra ID (formerly Azure AD).

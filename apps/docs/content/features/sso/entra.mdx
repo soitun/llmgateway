@@ -181,11 +181,19 @@ In LLM Gateway, on **Organization → SSO → Directory sync (SCIM)**, click **G
 
 In Entra, on your Enterprise App → **Provisioning → Automatic → Admin Credentials**:
 
+- **Authentication method:** choose the token option — labelled **"Long-lived bearer token"** (or **"Secret token"**). **Do not** pick "OAuth 2.0 code grant flow": LLM Gateway's SCIM endpoint authenticates a plain static bearer token (`Authorization: Bearer <token>`), not an OAuth code exchange. The presence of a **Tenant URL + Secret token** pair on the form confirms you're on the right method.
 - **Tenant URL:** the SCIM base URL, e.g. `https://internal.llmgateway.io/scim/v2`
 - **Secret Token:** the token from the previous step
-- Click **Test Connection** (Entra calls `/ServiceProviderConfig`), then **Save**.
+- Click **Test Connection** (Entra calls `/ServiceProviderConfig` with the bearer token), then **Save**.
 
 A green check confirms the credentials are valid.
+
+<Callout type="info">
+	Entra rolled out a redesigned provisioning UX that adds the **"Select
+	authentication method"** dropdown shown above. The classic UX has no dropdown
+	and just shows Tenant URL + Secret token (which is the bearer method). Either
+	is fine — pick the bearer/secret-token option and the steps are identical.
+</Callout>
 
 </Step>
 
