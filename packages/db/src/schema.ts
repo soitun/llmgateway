@@ -617,6 +617,54 @@ export const enterpriseContactSubmission = pgTable(
 	],
 );
 
+export const providerListingRequest = pgTable(
+	"provider_listing_request",
+	{
+		id: text().primaryKey().notNull().$defaultFn(shortid),
+		createdAt: timestamp().notNull().defaultNow(),
+		updatedAt: timestamp()
+			.notNull()
+			.defaultNow()
+			.$onUpdate(() => new Date()),
+		providerName: text().notNull(),
+		email: text().notNull(),
+		url: text().notNull(),
+		country: text().notNull(),
+		complianceSoc2Type2: boolean().notNull().default(false),
+		complianceIso27001: boolean().notNull().default(false),
+		complianceGdpr: boolean().notNull().default(false),
+		dataRetentionDays: integer(),
+		trainsOnData: boolean(),
+		paymentStatus: text({
+			enum: ["unpaid", "paid", "refunded"],
+		})
+			.notNull()
+			.default("unpaid"),
+		stripeCheckoutSessionId: text(),
+		paidAt: timestamp(),
+		honeypot: text(),
+		clientTimestampMs: text(),
+		ipAddress: text(),
+		userAgent: text(),
+		spamFilterStatus: text({
+			enum: ["pending", "rejected", "delivered", "delivery_failed"],
+		})
+			.notNull()
+			.default("pending"),
+		rejectionReason: text(),
+		archivedAt: timestamp(),
+	},
+	(table) => [
+		index("provider_listing_request_created_at_idx").on(table.createdAt),
+		index("provider_listing_request_email_idx").on(table.email),
+		index("provider_listing_request_status_idx").on(table.spamFilterStatus),
+		check(
+			"provider_listing_request_payment_status_check",
+			sql`${table.paymentStatus} IN ('unpaid', 'paid', 'refunded')`,
+		),
+	],
+);
+
 export const userOrganization = pgTable(
 	"user_organization",
 	{

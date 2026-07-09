@@ -1177,6 +1177,11 @@ async function handleCheckoutSessionCompleted(
 		return;
 	}
 
+	if (!subscription && metadata?.type === "provider_listing") {
+		await handleProviderListingCheckout(session);
+		return;
+	}
+
 	if (!subscription) {
 		logger.info("Not a subscription checkout session, skipping");
 		return;
@@ -1812,6 +1817,32 @@ async function recordCreditTopUp({
 			organization: organizationId,
 		},
 	});
+}
+
+async function handleProviderListingCheckout(session: Stripe.Checkout.Session) {
+	if (session.payment_status !== "paid") {
+		logger.info(
+			`Provider listing checkout session payment not yet settled (status: ${session.payment_status}), skipping`,
+		);
+		return;
+	}
+
+	const requestId = session.metadata?.submissionId;
+	if (!requestId) {
+		logger.error("Provider listing checkout session missing submissionId");
+		return;
+	}
+
+	await db
+		.update(tables.providerListingRequest)
+		.set({
+			paymentStatus: "paid",
+			stripeCheckoutSessionId: session.id,
+			paidAt: new Date(),
+		})
+		.where(eq(tables.providerListingRequest.id, requestId));
+
+	logger.info(`Marked provider listing request ${requestId} as paid`);
 }
 
 async function handleCreditTopUpCheckout(session: Stripe.Checkout.Session) {
