@@ -477,8 +477,7 @@ export function ChatPricingPlans({
 
 			<p className="mt-4 text-center text-xs text-muted-foreground">
 				Your allowance refills in full every cycle and any unspent credits
-				don&apos;t roll over. Pay-as-you-go top-ups never expire and kick in
-				automatically once your plan credits are used.
+				don&apos;t roll over.
 			</p>
 		</div>
 	);
