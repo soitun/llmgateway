@@ -353,9 +353,8 @@ export const metaModels = [
 				stability: "unstable",
 				providerId: "aws-bedrock",
 				externalId: "meta.llama4-scout-17b-instruct-v1:0",
-				// No `global.` Bedrock inference profile for Meta Llama, and Llama 4
-				// is geo-restricted by Meta's EULA on this account.
-				deactivatedAt: new Date("2026-07-09"),
+				// Meta Llama has no `global.` Bedrock inference profile, so pin the
+				// `us.` cross-region profile explicitly.
 				inputPrice: "0.17e-6",
 				outputPrice: "0.66e-6",
 				requestPrice: "0",
@@ -366,6 +365,7 @@ export const metaModels = [
 				vision: true,
 				tools: false,
 				jsonOutput: false,
+				regions: [{ id: "us" }],
 			},
 			{
 				stability: "unstable",
@@ -395,9 +395,8 @@ export const metaModels = [
 				stability: "unstable",
 				providerId: "aws-bedrock",
 				externalId: "meta.llama4-maverick-17b-instruct-v1:0",
-				// No `global.` Bedrock inference profile for Meta Llama, and Llama 4
-				// is geo-restricted by Meta's EULA on this account.
-				deactivatedAt: new Date("2026-07-09"),
+				// Meta Llama has no `global.` Bedrock inference profile, so pin the
+				// `us.` cross-region profile explicitly.
 				inputPrice: "0.24e-6",
 				outputPrice: "0.97e-6",
 				requestPrice: "0",
@@ -408,6 +407,7 @@ export const metaModels = [
 				vision: true,
 				tools: false,
 				jsonOutput: false,
+				regions: [{ id: "us" }],
 			},
 			{
 				providerId: "novita",
