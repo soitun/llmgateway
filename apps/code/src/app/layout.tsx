@@ -102,7 +102,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 			<body
 				className={`${inter.variable} ${geistMono.variable} ${bricolage.variable} antialiased`}
 			>
-				<GoogleTag googleTagId={config.googleTagId} />
+				<GoogleTag
+					googleTagId={config.googleTagId}
+					googleAdsSignupConversion={config.googleAdsSignupConversion}
+				/>
 				<Providers config={config}>{children}</Providers>
 			</body>
 		</html>
