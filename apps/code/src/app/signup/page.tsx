@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { useUser } from "@/hooks/useUser";
 import { useAuth } from "@/lib/auth-client";
 import { useAppConfig } from "@/lib/config";
+import { trackSignupConversion } from "@/lib/google-tag";
 
 const formSchema = z.object({
 	name: z.string().optional(),
@@ -50,7 +51,7 @@ function SignupForm() {
 	const queryClient = useQueryClient();
 	const router = useRouter();
 	const posthog = usePostHog();
-	const { posthogKey } = useAppConfig();
+	const { posthogKey, googleAdsSignupConversion } = useAppConfig();
 	const [isLoading, setIsLoading] = useState(false);
 	const { signUp } = useAuth();
 	const returnUrl = getSafeRedirectUrl(searchParams.get("returnUrl"));
@@ -100,6 +101,11 @@ function SignupForm() {
 							plan: selectedPlan,
 						});
 					}
+					trackSignupConversion({
+						email: values.email,
+						method: "email",
+						sendTo: googleAdsSignupConversion,
+					});
 					toast.success("Account created", {
 						description:
 							"Please check your email to verify your account before signing in.",

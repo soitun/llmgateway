@@ -10,6 +10,8 @@ export interface AppConfig {
 	twitterUrl: string;
 	posthogKey?: string;
 	posthogHost?: string;
+	googleTagId?: string;
+	googleAdsSignupConversion?: string;
 	stripePublishableKey?: string;
 	githubAuth: boolean;
 	googleAuth: boolean;
@@ -30,6 +32,8 @@ export function getConfig(): AppConfig {
 		twitterUrl: process.env.TWITTER_URL ?? "https://x.com/llmgateway",
 		posthogKey: process.env.POSTHOG_KEY,
 		posthogHost: process.env.POSTHOG_HOST,
+		googleTagId: process.env.GOOGLE_TAG_ID,
+		googleAdsSignupConversion: process.env.GOOGLE_ADS_SIGNUP_CONVERSION,
 		stripePublishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
 		githubAuth: !!process.env.GITHUB_CLIENT_ID,
 		googleAuth: !!process.env.GOOGLE_CLIENT_ID,

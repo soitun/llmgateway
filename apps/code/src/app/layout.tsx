@@ -1,5 +1,6 @@
 import { Bricolage_Grotesque, Inter, Geist_Mono } from "next/font/google";
 
+import { GoogleTag } from "@/components/google-tag";
 import { Providers } from "@/components/providers";
 import { getConfig } from "@/lib/config-server";
 
@@ -101,6 +102,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 			<body
 				className={`${inter.variable} ${geistMono.variable} ${bricolage.variable} antialiased`}
 			>
+				<GoogleTag googleTagId={config.googleTagId} />
 				<Providers config={config}>{children}</Providers>
 			</body>
 		</html>
