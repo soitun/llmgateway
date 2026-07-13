@@ -30,6 +30,7 @@ import {
 	notifyChatPlanRenewed,
 	notifyChatPlanSubscribed,
 	notifyCreditsPurchased,
+	notifyRefund,
 	notifyDevPlanCancelled,
 	notifyDevPlanRenewed,
 	notifyDevPlanSubscribed,
@@ -567,7 +568,7 @@ function getInvoiceConfirmationClientSecret(
 	return confirmationSecret?.client_secret ?? null;
 }
 
-async function getPaymentIntentFromInvoicePayments(
+export async function getPaymentIntentFromInvoicePayments(
 	invoice: Stripe.Invoice,
 ): Promise<Stripe.PaymentIntent | null> {
 	let invoicePayments = invoice.payments?.data ?? [];
@@ -2873,6 +2874,21 @@ async function resolveRefundInvoiceId(
 	return typeof invoice === "string" ? invoice : (invoice.id ?? undefined);
 }
 
+// Human-readable product name for a refunded purchase, used in the internal
+// Discord refund notification.
+function refundProductLabel(type: string): string {
+	if (type === "credit_topup") {
+		return "Credits";
+	}
+	if (type.startsWith("dev_plan")) {
+		return "DevPass";
+	}
+	if (type.startsWith("chat_plan")) {
+		return "Chat Plan";
+	}
+	return "Subscription";
+}
+
 export async function handleChargeRefunded(
 	event: Stripe.ChargeRefundedEvent,
 	options: { endUserOnly?: boolean } = {},
@@ -3065,6 +3081,50 @@ export async function handleChargeRefunded(
 				credits: sql`${tables.organization.credits} - ${creditRefundAmount}`,
 			})
 			.where(eq(tables.organization.id, originalTransaction.organizationId));
+	}
+
+	// A full refund of a dev/chat plan payment ends the plan — cancel the Stripe
+	// subscription so the customer isn't left refunded-but-still-subscribed.
+	// Handling it here (rather than only in the self-refund endpoint) covers every
+	// refund source: the self-service dashboard, the admin panel, and manual
+	// refunds issued straight from the Stripe dashboard. Cancelling emits
+	// customer.subscription.deleted, which resets the plan fields and records the
+	// *_plan_end transaction. Gated on a full refund so a partial refund doesn't
+	// tear down the whole plan.
+	if (charge.refunded) {
+		const planSubscriptionId = originalTransaction.type.startsWith("dev_plan")
+			? organization.devPlanStripeSubscriptionId
+			: originalTransaction.type.startsWith("chat_plan")
+				? organization.chatPlanStripeSubscriptionId
+				: null;
+		if (planSubscriptionId) {
+			try {
+				await getStripe().subscriptions.cancel(planSubscriptionId);
+				logger.info(
+					`Cancelled subscription ${planSubscriptionId} after full refund of ${originalTransaction.type} for organization ${organization.id}`,
+				);
+			} catch (error) {
+				logger.error(
+					`Refund recorded but cancelling subscription ${planSubscriptionId} failed for organization ${organization.id}`,
+					error as Error,
+				);
+			}
+		}
+	}
+
+	// Notify the internal Discord channel, mirroring the purchase notification.
+	// Runs after the transaction insert (which is guarded by the stripeRefundId
+	// dedupe check above), so webhook retries won't double-notify.
+	if (organization.billingEmail) {
+		const refundUser = await db.query.user.findFirst({
+			where: { email: { eq: organization.billingEmail } },
+		});
+		await notifyRefund(
+			organization.billingEmail,
+			refundUser?.name,
+			refundAmountInDollars,
+			refundProductLabel(originalTransaction.type),
+		);
 	}
 
 	// Track in PostHog
