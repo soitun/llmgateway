@@ -15,10 +15,10 @@ import { CodeCTATracker } from "@/components/LandingTracker";
 import { PricingPlans } from "@/components/PricingPlans";
 import { Button } from "@/components/ui/button";
 import { getConfig } from "@/lib/config-server";
-import { formatUsageRatio, formatUsd } from "@/lib/utils";
+import { formatUsageRatio } from "@/lib/utils";
 
 import {
-	DEV_PLAN_PREMIUM_WEEKLY_LIMITS,
+	DEV_PLAN_PREMIUM_WEEKLY_PERCENT,
 	DEV_PLAN_PRICES,
 	getDevPlanCreditsLimit,
 } from "@llmgateway/shared";
@@ -137,9 +137,9 @@ const usageRows: UsageRow[] = [
 	},
 	{
 		label: "Frontier flagship fair-use (Opus, GPT Pro, Gemini Pro, Grok)",
-		lite: `${formatUsd(DEV_PLAN_PREMIUM_WEEKLY_LIMITS.lite)}/wk`,
-		pro: `${formatUsd(DEV_PLAN_PREMIUM_WEEKLY_LIMITS.pro)}/wk`,
-		max: `${formatUsd(DEV_PLAN_PREMIUM_WEEKLY_LIMITS.max)}/wk`,
+		lite: `${Math.round(DEV_PLAN_PREMIUM_WEEKLY_PERCENT.lite * 100)}% of credits`,
+		pro: `${Math.round(DEV_PLAN_PREMIUM_WEEKLY_PERCENT.pro * 100)}% of credits`,
+		max: `${Math.round(DEV_PLAN_PREMIUM_WEEKLY_PERCENT.max * 100)}% of credits`,
 	},
 	{
 		label: "Priority routing on flagship models",

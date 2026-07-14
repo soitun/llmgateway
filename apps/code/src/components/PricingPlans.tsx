@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { formatUsageRatio } from "@/lib/utils";
 
 import {
-	DEV_PLAN_PREMIUM_WEEKLY_LIMITS,
+	DEV_PLAN_PREMIUM_WEEKLY_PERCENT,
 	DEV_PLAN_PRICES,
 	MARKETING_STATS,
 	type DevPlanTier,
@@ -48,7 +48,7 @@ const plans: PlanContent[] = [
 		features: [
 			"Everything in Lite",
 			"Headroom for a full agent session every day",
-			"5× the frontier fair-use of Lite",
+			"More frontier fair-use headroom than Lite",
 			"Priority routing on flagship models",
 		],
 	},
@@ -159,7 +159,10 @@ export function PricingPlans({ credits, paygoUrl }: PricingPlansProps) {
 										Frontier fair-use
 									</dt>
 									<dd className="font-mono text-xs font-semibold tabular-nums">
-										${DEV_PLAN_PREMIUM_WEEKLY_LIMITS[plan.tier]} / week
+										{Math.round(
+											DEV_PLAN_PREMIUM_WEEKLY_PERCENT[plan.tier] * 100,
+										)}
+										% of credits
 									</dd>
 								</div>
 								<div className="flex items-center justify-between gap-3 px-3.5 py-2">
