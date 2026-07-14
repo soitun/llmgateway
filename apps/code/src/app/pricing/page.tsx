@@ -15,7 +15,7 @@ import { CodeCTATracker } from "@/components/LandingTracker";
 import { PricingPlans } from "@/components/PricingPlans";
 import { Button } from "@/components/ui/button";
 import { getConfig } from "@/lib/config-server";
-import { formatUsd } from "@/lib/utils";
+import { formatUsageRatio, formatUsd } from "@/lib/utils";
 
 import {
 	DEV_PLAN_PREMIUM_WEEKLY_LIMITS,
@@ -129,16 +129,10 @@ const productSchema = {
 
 const usageRows: UsageRow[] = [
 	{
-		label: "You pay",
-		lite: `${formatUsd(DEV_PLAN_PRICES.lite)}/mo`,
-		pro: `${formatUsd(DEV_PLAN_PRICES.pro)}/mo`,
-		max: `${formatUsd(DEV_PLAN_PRICES.max)}/mo`,
-	},
-	{
-		label: "Model usage at provider rates",
-		lite: `${formatUsd(liteCredits)}/mo`,
-		pro: `${formatUsd(proCredits)}/mo`,
-		max: `${formatUsd(maxCredits)}/mo`,
+		label: "Usage value (metered at provider rates)",
+		lite: `${formatUsageRatio(liteCredits, DEV_PLAN_PRICES.lite)} what you pay`,
+		pro: `${formatUsageRatio(proCredits, DEV_PLAN_PRICES.pro)} what you pay`,
+		max: `${formatUsageRatio(maxCredits, DEV_PLAN_PRICES.max)} what you pay`,
 		emphasis: true,
 	},
 	{
