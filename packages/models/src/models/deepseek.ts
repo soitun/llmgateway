@@ -84,6 +84,7 @@ export const deepseekModels = [
 			{
 				providerId: "bytedance",
 				externalId: "deepseek-v3-1-250821",
+				deactivatedAt: new Date("2026-07-11"),
 				inputPrice: "0.56e-6",
 				cachedInputPrice: "0.112e-6",
 				outputPrice: "1.68e-6",
@@ -211,6 +212,10 @@ export const deepseekModels = [
 			{
 				providerId: "vertex-openai",
 				externalId: "deepseek-ai/deepseek-v3.2-maas",
+				// Vertex MaaS throttles this model's tiny concurrency quota (429
+				// RESOURCE_EXHAUSTED even for single spaced-out requests,
+				// verified 2026-07-14), flaking e2e
+				stability: "unstable",
 				inputPrice: "0.56e-6",
 				cachedInputPrice: "0.056e-6",
 				outputPrice: "1.68e-6",

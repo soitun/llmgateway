@@ -993,7 +993,8 @@ export const googleModels = [
 				reasoning: true,
 				reasoningEfforts: ["minimal", "high"],
 				reasoningMaxTokens: true,
-				jsonOutput: true,
+				// upstream rejects responseMimeType application/json (400)
+				jsonOutput: false,
 				jsonOutputSchema: false,
 			},
 			{
@@ -1018,7 +1019,11 @@ export const googleModels = [
 				tools: false,
 				reasoning: true,
 				reasoningMaxTokens: true,
-				jsonOutput: true,
+				// Vertex serves this model with HIGH thinking only; other thinking
+				// levels are rejected with a 400
+				reasoningEfforts: ["none", "high"],
+				// upstream rejects responseMimeType application/json (400)
+				jsonOutput: false,
 				jsonOutputSchema: false,
 			},
 		],
@@ -1056,6 +1061,10 @@ export const googleModels = [
 				webSearch: true,
 				jsonOutput: true,
 				jsonOutputSchema: true,
+				// AI Studio's json_object mode emits a stray trailing brace (and
+				// sometimes prose) after the JSON — Vertex is unaffected
+				// (verified live 2026-07-14)
+				healStreamingJsonOutput: true,
 			},
 			{
 				providerId: "google-vertex",

@@ -118,6 +118,10 @@ export const moonshotModels = [
 			{
 				providerId: "moonshot",
 				externalId: "kimi-k2-thinking",
+				// Moonshot rejects forced tool_choice ("required"/named function)
+				// when thinking is enabled, which cannot be disabled on reasoning
+				// models. Only "auto"/"none" are accepted.
+				supportedToolChoices: ["auto", "none"],
 				inputPrice: "0.6e-6",
 				outputPrice: "2.5e-6",
 				cachedInputPrice: "0.15e-6",
@@ -191,6 +195,9 @@ export const moonshotModels = [
 			{
 				providerId: "moonshot",
 				externalId: "kimi-k2-thinking-turbo",
+				// Reasoning model: forced tool_choice is rejected while thinking is
+				// on, so only "auto"/"none" are accepted.
+				supportedToolChoices: ["auto", "none"],
 				// Frequently overloaded (429 engine_overloaded_error)
 				stability: "unstable",
 				inputPrice: "1.15e-6",
@@ -219,6 +226,9 @@ export const moonshotModels = [
 			{
 				providerId: "moonshot",
 				externalId: "kimi-k2.5",
+				// Reasoning model: forced tool_choice is rejected while thinking is
+				// on, so only "auto"/"none" are accepted.
+				supportedToolChoices: ["auto", "none"],
 				inputPrice: "0.6e-6",
 				outputPrice: "3.0e-6",
 				cachedInputPrice: "0.1e-6",
@@ -350,6 +360,9 @@ export const moonshotModels = [
 			{
 				providerId: "moonshot",
 				externalId: "kimi-k2.6",
+				// Reasoning model: forced tool_choice is rejected while thinking is
+				// on, so only "auto"/"none" are accepted.
+				supportedToolChoices: ["auto", "none"],
 				inputPrice: "0.95e-6",
 				cachedInputPrice: "0.16e-6",
 				outputPrice: "4.0e-6",
@@ -371,6 +384,10 @@ export const moonshotModels = [
 			{
 				providerId: "canopywave",
 				externalId: "moonshotai/kimi-k2.6",
+				// canopywave's kimi-k2.6 deployment 503s on every request ("No
+				// available prefill workers") while other models on the same key
+				// work (verified 2026-07-14)
+				stability: "unstable",
 				inputPrice: "0.5e-6",
 				cachedInputPrice: "0.1e-6",
 				outputPrice: "2.8e-6",
@@ -417,6 +434,9 @@ export const moonshotModels = [
 			{
 				providerId: "tundra",
 				externalId: "kimi-k2.6",
+				// Tundra rejects tool_choice="required" with a 400; named/forced
+				// function choice works, so allow everything except "required".
+				supportedToolChoices: ["auto", "none", "function"],
 				inputPrice: "0.4e-6",
 				cachedInputPrice: "0.08e-6",
 				outputPrice: "2.2e-6",
@@ -449,6 +469,9 @@ export const moonshotModels = [
 			{
 				providerId: "moonshot",
 				externalId: "kimi-k2.7-code",
+				// Reasoning model: forced tool_choice is rejected while thinking is
+				// on, so only "auto"/"none" are accepted.
+				supportedToolChoices: ["auto", "none"],
 				inputPrice: "0.95e-6",
 				cachedInputPrice: "0.19e-6",
 				outputPrice: "4.0e-6",
@@ -480,6 +503,9 @@ export const moonshotModels = [
 			{
 				providerId: "moonshot",
 				externalId: "kimi-k2.7-code-highspeed",
+				// Reasoning model: forced tool_choice is rejected while thinking is
+				// on, so only "auto"/"none" are accepted.
+				supportedToolChoices: ["auto", "none"],
 				inputPrice: "1.9e-6",
 				cachedInputPrice: "0.38e-6",
 				outputPrice: "8.0e-6",

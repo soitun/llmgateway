@@ -20,6 +20,7 @@ import {
 	supportsOpenAIExplicitPromptCache,
 	supportsOpenAIExtendedPromptCache,
 	supportsServiceTier,
+	type ToolChoiceMode,
 	type ToolChoiceType,
 	type WebSearchTool,
 } from "@llmgateway/models";
@@ -75,6 +76,55 @@ export function deriveConversationCacheKey(
 		.update(JSON.stringify(prefix))
 		.digest("hex")
 		.slice(0, 32);
+}
+
+/**
+ * Collapse an OpenAI `tool_choice` value to its coarse mode so it can be
+ * checked against a mapping's `supportedToolChoices`. A named function choice
+ * (`{type:"function",...}`) maps to "function".
+ */
+function toolChoiceModeOf(
+	toolChoice: ToolChoiceType,
+): ToolChoiceMode | undefined {
+	if (
+		toolChoice === "auto" ||
+		toolChoice === "none" ||
+		toolChoice === "required"
+	) {
+		return toolChoice;
+	}
+	if (typeof toolChoice === "object" && toolChoice?.type === "function") {
+		return "function";
+	}
+	return undefined;
+}
+
+/**
+ * Recursively remove `default` keywords from a JSON schema. Keys inside a
+ * `properties` map are property names, not schema keywords, so a property
+ * literally named "default" is preserved.
+ */
+function stripSchemaDefaults(
+	schema: unknown,
+	isPropertiesMap = false,
+): unknown {
+	if (Array.isArray(schema)) {
+		return schema.map((item) => stripSchemaDefaults(item));
+	}
+	if (schema && typeof schema === "object") {
+		const out: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(schema)) {
+			if (!isPropertiesMap && key === "default") {
+				continue;
+			}
+			out[key] = stripSchemaDefaults(
+				value,
+				!isPropertiesMap && key === "properties",
+			);
+		}
+		return out;
+	}
+	return schema;
 }
 
 function getProviderMapping(
@@ -1484,8 +1534,12 @@ export async function prepareRequestBody(
 		}
 	}
 
-	// Resolve tool_choice: fall back to "auto" when the provider mapping
-	// explicitly lists supportedParameters but omits "tool_choice".
+	// Resolve tool_choice against what the mapping declares it accepts. Fall
+	// back to "auto" when the mapping omits "tool_choice" from
+	// supportedParameters, or when the requested tool_choice mode isn't listed
+	// in the mapping's supportedToolChoices. This keeps forced-tool requests
+	// working on providers that only accept a subset of tool_choice modes,
+	// instead of hard-coding per-provider downgrades here.
 	let resolvedToolChoice = tool_choice;
 	if (tool_choice) {
 		const mapping = modelDef?.providers.find(
@@ -1493,10 +1547,22 @@ export async function prepareRequestBody(
 				p.providerId === usedProvider &&
 				((p as ProviderModelMapping).region ?? null) === usedRegion,
 		) as ProviderModelMapping | undefined;
-		const supported = mapping?.supportedParameters;
-		const supportsToolChoice =
-			!supported || supported.length === 0 || supported.includes("tool_choice");
-		resolvedToolChoice = supportsToolChoice ? tool_choice : "auto";
+
+		const supportedParams = mapping?.supportedParameters;
+		const toolChoiceParamSupported =
+			!supportedParams ||
+			supportedParams.length === 0 ||
+			supportedParams.includes("tool_choice");
+
+		const supportedModes = mapping?.supportedToolChoices;
+		const mode = toolChoiceModeOf(tool_choice);
+		const modeSupported =
+			!supportedModes ||
+			supportedModes.length === 0 ||
+			(mode !== undefined && supportedModes.includes(mode));
+
+		resolvedToolChoice =
+			toolChoiceParamSupported && modeSupported ? tool_choice : "auto";
 		requestBody.tool_choice = resolvedToolChoice;
 	}
 
@@ -1522,46 +1588,8 @@ export async function prepareRequestBody(
 		}
 	}
 
-	if (forcesToolUse && usedProvider === "moonshot") {
-		const providerMapping = modelDef?.providers.find(
-			(p) =>
-				p.providerId === usedProvider &&
-				((p as ProviderModelMapping).region ?? null) === usedRegion,
-		);
-		const isReasoningModel =
-			providerMapping &&
-			"reasoning" in providerMapping &&
-			providerMapping.reasoning === true;
-		if (isReasoningModel) {
-			// Moonshot rejects tool_choice="required" (and forced function choice)
-			// when thinking is enabled, and thinking cannot be disabled on
-			// reasoning models. Downgrade to "auto" so the request still works.
-			resolvedToolChoice = "auto";
-			requestBody.tool_choice = "auto";
-		}
-	}
-
-	if (
-		forcesToolUse &&
-		usedProvider === "tundra" &&
-		resolvedToolChoice === "required"
-	) {
-		// The Tundra upstream rejects tool_choice="required" with a 400.
-		// Named/forced function choice works, so only downgrade the "required"
-		// sentinel to "auto" so the request still succeeds.
-		resolvedToolChoice = "auto";
-		requestBody.tool_choice = "auto";
-	}
-
-	if (
-		forcesToolUse &&
-		usedProvider === "azure" &&
-		usedInternalModel === "gpt-oss-120b"
-	) {
-		// Azure's gpt-oss-120b rejects tool_choice="required" with UnsupportedToolUse.
-		resolvedToolChoice = "auto";
-		requestBody.tool_choice = "auto";
-	}
+	// Per-provider tool_choice downgrades are declared on the model mappings via
+	// `supportedToolChoices` and applied in the resolution block above.
 
 	// Override temperature to 1 for GPT-5 models (they only support temperature = 1)
 	if (usedInternalModel.startsWith("gpt-5")) {
@@ -1902,6 +1930,24 @@ export async function prepareRequestBody(
 				requestBody.response_format = response_format;
 			}
 
+			// zai's glm-4.6 hangs indefinitely when a tool parameter schema
+			// contains a `default` keyword (verified live 2026-07-14). Defaults
+			// are advisory in JSON Schema, so strip them for all zai models.
+			if (Array.isArray(requestBody.tools)) {
+				requestBody.tools = requestBody.tools.map(
+					(tool: { function?: { parameters?: unknown } }) =>
+						tool?.function?.parameters
+							? {
+									...tool,
+									function: {
+										...tool.function,
+										parameters: stripSchemaDefaults(tool.function.parameters),
+									},
+								}
+							: tool,
+				);
+			}
+
 			// Add web search tool for ZAI
 			// ZAI uses a web_search tool with enable flag and search_engine config
 			if (webSearchTool) {
@@ -1934,12 +1980,19 @@ export async function prepareRequestBody(
 			// ZAI/GLM models use a `thinking` parameter instead of `reasoning_effort`.
 			// Mirror the OpenAI/Anthropic/Google contract: thinking is opt-in via
 			// `reasoning_effort`. Unset or `minimal` => disabled, anything else => enabled.
+			// Exception: disabling thinking corrupts GLM structured output
+			// (verified live: glm-4.5 emits tool calls as raw <tool_call> text,
+			// glm-4.6v-flashx appends a stray "End" token after JSON output), so
+			// for requests with tools or a response_format leave the provider
+			// default (enabled) rather than disabling.
 			if (supportsReasoning) {
 				const wantsThinking =
 					reasoning_effort !== undefined && reasoning_effort !== "minimal";
-				requestBody.thinking = {
-					type: wantsThinking ? "enabled" : "disabled",
-				};
+				if (wantsThinking || (!requestBody.tools && !response_format)) {
+					requestBody.thinking = {
+						type: wantsThinking ? "enabled" : "disabled",
+					};
+				}
 			}
 			// Add sensitive_word_check if provided (Z.ai specific)
 			if (sensitive_word_check) {
@@ -3071,6 +3124,16 @@ export async function prepareRequestBody(
 			if (usedExternalId.startsWith(`${usedProvider}/`)) {
 				requestBody.model = usedExternalId.substring(usedProvider.length + 1);
 			}
+
+			// Together rejects assistant tool_call messages whose content is null
+			// with a bare "Input validation error", even though the OpenAI spec
+			// allows null there; an empty string is accepted.
+			requestBody.messages = (requestBody.messages as BaseMessage[]).map((m) =>
+				m.role === "assistant" &&
+				(m.content === null || m.content === undefined)
+					? { ...m, content: "" }
+					: m,
+			);
 
 			if (response_format) {
 				requestBody.response_format = response_format;

@@ -731,6 +731,9 @@ export const openaiModels = [
 			{
 				providerId: "nebius",
 				externalId: "openai/gpt-oss-120b",
+				// Streaming tool calls arrive malformed from nebius (vLLM emits a
+				// bogus tool_call index on the final argument fragment)
+				stability: "unstable",
 				inputPrice: "0.15e-6",
 				outputPrice: "0.6e-6",
 				requestPrice: "0",
@@ -768,6 +771,9 @@ export const openaiModels = [
 				streaming: true,
 				vision: false,
 				tools: true,
+				// Azure's gpt-oss-120b rejects tool_choice="required" (and named
+				// function choices) with UnsupportedToolUse.
+				supportedToolChoices: ["auto", "none"],
 				reasoning: true,
 				// Azure's gpt-oss-120b accepts response_format but wraps the output
 				// in a `{"final": "..."}` envelope instead of the requested schema.

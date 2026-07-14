@@ -47,6 +47,9 @@ export const zaiModels = [
 			{
 				providerId: "embercloud",
 				externalId: "glm-5.2",
+				// embercloud rate-limits this model on every request (429 even for
+				// single spaced-out calls, verified 2026-07-14)
+				stability: "unstable",
 				inputPrice: "1.26e-6",
 				outputPrice: "3.96e-6",
 				cachedInputPrice: "0.234e-6",
@@ -147,9 +150,27 @@ export const zaiModels = [
 				quantization: "fp8",
 				streaming: true,
 				reasoning: true,
+				// novita's glm-5.1 reasons adaptively and omits reasoning_content
+				// for simple prompts; no parameter forces it on
+				reasoningOutput: "omit",
 				vision: false,
 				tools: true,
 				jsonOutput: true,
+				// novita disables thinking when reasoning_effort is forwarded
+				// (empty reasoning_content); omitting it reasons by default, so
+				// exclude reasoning_effort here (verified live 2026-07-14)
+				supportedParameters: [
+					"temperature",
+					"max_tokens",
+					"top_p",
+					"frequency_penalty",
+					"presence_penalty",
+					"stop",
+					"stream",
+					"response_format",
+					"tools",
+					"tool_choice",
+				],
 			},
 			{
 				providerId: "together-ai",
@@ -187,6 +208,9 @@ export const zaiModels = [
 			{
 				providerId: "embercloud",
 				externalId: "glm-5.1",
+				// embercloud returns 400 "Temporary routing error" on every request
+				// for this model (verified 2026-07-14)
+				stability: "unstable",
 				inputPrice: "0.931e-6",
 				outputPrice: "2.93e-6",
 				cachedInputPrice: "0.173e-6",
@@ -308,6 +332,8 @@ export const zaiModels = [
 			{
 				providerId: "embercloud",
 				externalId: "glm-5",
+				// embercloud reasoning requests time out repeatedly in e2e
+				stability: "unstable",
 				inputPrice: "0.72e-6",
 				outputPrice: "2.3e-6",
 				cachedInputPrice: "0.144e-6",
@@ -380,6 +406,10 @@ export const zaiModels = [
 			{
 				providerId: "zai",
 				externalId: "glm-4.5",
+				// Tool calling is unreliable: zai returns tool calls as inline
+				// <tool_call> XML in message content instead of structured
+				// tool_calls, so the gateway cannot surface them.
+				stability: "unstable",
 				inputPrice: "0.6e-6",
 				cachedInputPrice: "0.11e-6",
 				outputPrice: "2.2e-6",
@@ -397,6 +427,9 @@ export const zaiModels = [
 			{
 				providerId: "embercloud",
 				externalId: "glm-4.5",
+				// embercloud rate-limits this model on every request (429 even for
+				// single spaced-out calls, verified 2026-07-14)
+				stability: "unstable",
 				inputPrice: "0.6e-6",
 				outputPrice: "2.2e-6",
 				cachedInputPrice: "0.11e-6",
@@ -496,6 +529,9 @@ export const zaiModels = [
 			{
 				providerId: "embercloud",
 				externalId: "glm-4.5-air",
+				// embercloud rate-limits this model on every request (429 even for
+				// single spaced-out calls, verified 2026-07-14)
+				stability: "unstable",
 				inputPrice: "0.13e-6",
 				outputPrice: "0.85e-6",
 				cachedInputPrice: "0.025e-6",
@@ -734,6 +770,8 @@ export const zaiModels = [
 			{
 				providerId: "embercloud",
 				externalId: "glm-4.7",
+				// embercloud reasoning requests time out repeatedly in e2e
+				stability: "unstable",
 				inputPrice: "0.38e-6",
 				outputPrice: "1.98e-6",
 				cachedInputPrice: "0.19e-6",
@@ -851,6 +889,9 @@ export const zaiModels = [
 			{
 				providerId: "embercloud",
 				externalId: "glm-4.7-flash",
+				// embercloud rate-limits this model on every request (429 even for
+				// single spaced-out calls, verified 2026-07-14)
+				stability: "unstable",
 				inputPrice: "0.06e-6",
 				outputPrice: "0.4e-6",
 				cachedInputPrice: "0.01e-6",
@@ -902,6 +943,9 @@ export const zaiModels = [
 				reasoning: true,
 				vision: false,
 				tools: true,
+				// zai hangs indefinitely on tool_choice "required" and named
+				// function choices for glm-4.6 (verified live 2026-07-14)
+				supportedToolChoices: ["auto", "none"],
 				webSearch: true,
 				webSearchPrice: "0.01", // $0.01 per search
 				jsonOutput: true,
