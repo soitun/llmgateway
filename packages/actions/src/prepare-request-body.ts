@@ -3307,17 +3307,19 @@ export async function prepareRequestBody(
 				}
 			}
 
-			// Set all safety settings to BLOCK_NONE to disable content filtering
+			// OFF fully disables the safety filters (unlike BLOCK_NONE, which
+			// still runs the classifiers); requires Gemini 2.0+, which all
+			// active mappings on these providers are.
 			requestBody.safetySettings = [
-				{ category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-				{ category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+				{ category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
+				{ category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
 				{
 					category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-					threshold: "BLOCK_NONE",
+					threshold: "OFF",
 				},
 				{
 					category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-					threshold: "BLOCK_NONE",
+					threshold: "OFF",
 				},
 			];
 
