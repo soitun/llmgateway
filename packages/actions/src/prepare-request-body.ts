@@ -754,6 +754,19 @@ function transformMessagesForNoSystemRole(messages: any[]): any[] {
 }
 
 /**
+ * Maps the OpenAI-only `developer` role to `system`. Applied only for mappings
+ * that declare `supportsDeveloperRole: false`, i.e. upstreams that reject
+ * `developer` with a 400 ("developer is not one of ['system', 'assistant',
+ * 'user', 'tool', 'function']"). `developer` is semantically a system
+ * instruction, so downgrading it to `system` is safe on those upstreams.
+ */
+function transformDeveloperRole(messages: any[]): any[] {
+	return messages.map((message) =>
+		message.role === "developer" ? { ...message, role: "system" } : message,
+	);
+}
+
+/**
  * Transforms message content types for OpenAI's Responses API.
  * The Responses API uses different content type identifiers:
  * - "text" -> "input_text" (for user/system/tool messages) or "output_text" (for assistant messages)
@@ -1376,10 +1389,26 @@ export async function prepareRequestBody(
 	const supportsSystemRole =
 		(modelDef as ModelDefinition)?.supportsSystemRole !== false;
 
-	// Transform messages if model doesn't support system role
 	let processedMessages = messages;
+
+	// Rewrite the OpenAI-only `developer` role to `system` for mappings that
+	// declare they don't accept it (`supportsDeveloperRole: false`). Some
+	// OpenAI-compatible upstreams reject `developer` with a 400 ("developer is
+	// not one of ['system', 'assistant', 'user', 'tool', 'function']"). Mappings
+	// default to accepting `developer`, so this only rewrites where explicitly
+	// opted out.
+	const developerRoleMapping = getProviderMapping(
+		modelDef,
+		usedProvider,
+		usedRegion,
+	);
+	if (developerRoleMapping?.supportsDeveloperRole === false) {
+		processedMessages = transformDeveloperRole(processedMessages);
+	}
+
+	// Transform messages if model doesn't support system role
 	if (!supportsSystemRole) {
-		processedMessages = transformMessagesForNoSystemRole(messages);
+		processedMessages = transformMessagesForNoSystemRole(processedMessages);
 	}
 
 	// Strip Anthropic-style cache_control markers from caller-supplied content

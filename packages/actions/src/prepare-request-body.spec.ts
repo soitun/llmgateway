@@ -4880,3 +4880,65 @@ describe("prepareRequestBody - Xiaomi", () => {
 		expect(requestBody.reasoning_effort).toBe("medium");
 	});
 });
+
+describe("prepareRequestBody - developer role normalization", () => {
+	async function prepare(
+		provider: string,
+		model: string,
+		region: string | null = null,
+	) {
+		return (await prepareRequestBody(
+			provider,
+			model,
+			region,
+			model,
+			[
+				{ role: "developer", content: "You are a helpful assistant." },
+				{ role: "user", content: "Hello" },
+			] as any,
+			false,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			false,
+			false,
+		)) as any;
+	}
+
+	test("rewrites developer to system for a mapping with supportsDeveloperRole: false (granite/glm-5.2)", async () => {
+		const requestBody = await prepare("granite", "glm-5.2");
+		expect(requestBody.messages[0].role).toBe("system");
+		expect(requestBody.messages[0].content).toBe(
+			"You are a helpful assistant.",
+		);
+		expect(requestBody.messages[1].role).toBe("user");
+	});
+
+	test("rewrites developer to system for alibaba/glm-5.2 (supportsDeveloperRole: false)", async () => {
+		const requestBody = await prepare("alibaba", "glm-5.2");
+		expect(requestBody.messages[0].role).toBe("system");
+		expect(requestBody.messages[1].role).toBe("user");
+	});
+
+	test("resolves the flag through region expansion for alibaba/glm-5.2 (singapore)", async () => {
+		const requestBody = await prepare("alibaba", "glm-5.2", "singapore");
+		expect(requestBody.messages[0].role).toBe("system");
+		expect(requestBody.messages[1].role).toBe("user");
+	});
+
+	test("preserves developer role for a mapping that supports it (zai/glm-5.2)", async () => {
+		const requestBody = await prepare("zai", "glm-5.2");
+		expect(requestBody.messages[0].role).toBe("developer");
+	});
+
+	test("preserves developer role for OpenAI", async () => {
+		const requestBody = await prepare("openai", "gpt-4o-mini");
+		expect(requestBody.messages[0].role).toBe("developer");
+	});
+});
