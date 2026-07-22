@@ -1190,7 +1190,7 @@ export const providers: ProviderDefinition[] = [
 			apiTraining: false,
 			consumerTraining: false,
 			promptLogging: false,
-			retentionPeriod: null,
+			retentionPeriod: "0 days",
 		},
 	},
 	{
